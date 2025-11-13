@@ -4,8 +4,10 @@ output: pdf_document
 date: "2025-10-24"
 ---
 ```{r}
-library(csvread)
-getwd()
+install.packages('googlesheets4')
+library(googlesheets4)
+MASTER = read_sheet('https://docs.google.com/spreadsheets/d/1jhqeuVwg7_icGaYOh5YpMcoPubQsDs3fn9fWGcZmFi4/edit?gid=1766421584#gid=1766421584')
+
 MASTER = read.csv("BR ARKEV survey data.csv", header = TRUE)
 MASTER <- MASTER %>%
   mutate(count = as.numeric(MASTER$count))%>%
