@@ -1,0 +1,381 @@
+---
+title: "kelp_survivorship"
+output: html_document
+date: "2025-10-20"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+```
+
+##Big River Survivorship
+
+```{r}
+noyo_kelp <- read.csv("Noyo kelp on ARKEV.csv") |>
+  mutate(site = "Noyo") |>
+  rename(stipe_length = stipe_length_cm) |>
+  mutate(stipe_length = as.numeric(stipe_length))
+  
+```
+
+
+```{r cars}
+br_kelp <- read_csv("BR kelp on ARKEV.csv") |>
+    mutate(site = "Big River") |>
+  filter(!is.na(kelp_on_ARKEV)) |>
+  mutate(stipe_length = as.numeric(stipe_length))
+
+```
+
+```{r}
+br_clean <- br_kelp |>
+  mutate(date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d"))|>
+  distinct(site, date, ARKEV_unit, .keep_all = TRUE) |>
+  group_by(site, date) |>
+  mutate(total = sum(kelp_on_ARKEV))
+
+```
+
+
+
+
+## Tristin's Plot
+
+```{r pressure, echo=FALSE}
+ggplot(br_clean, aes(x = date, y = total, color = site, group = site)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+    scale_x_date(
+    date_breaks = "1 month",        # one tick per month
+    date_labels = "%b"              # short month names: Jan, Feb, Mar
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA)  # starts at 0, automatic upper limit
+  ) +
+  labs(title = "Total Number of Spliced Sporophytes on ARKEVs", x = "Month", 
+       y = "# Spliced Individuals", 
+       color = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_blank()
+  )
+```
+
+
+
+```{r}
+full_kelp <- bind_rows(noyo_kelp, br_kelp)
+  view(full_kelp)
+```
+
+```{r}
+full_clean <- full_kelp |>
+  mutate(date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  )|>
+  distinct(site, date, ARKEV_unit, .keep_all = TRUE) |>
+  group_by(site, date) |>
+  mutate(total = sum(kelp_on_ARKEV))
+```
+
+
+
+
+```{r}
+
+ggplot(full_clean, aes(x = date, y = total, color = site, group = site)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+    scale_x_date(
+    date_breaks = "1 month",        # one tick per month
+    date_labels = "%b"              # short month names: Jan, Feb, Mar
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA)  # starts at 0, automatic upper limit
+  ) +
+  labs(
+    title = "Total Number of Spiced Sporophytes on ARKEVs",
+    x = "Month",
+    y = "# Spliced Individuals",
+    color = "Site"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+
+```
+
+
+##Big River Survivorship by plot
+
+
+```{r}
+bydate <- full_kelp |>
+  mutate(
+    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  ) |>
+  distinct(site, date, ARKEV_unit, .keep_all = TRUE) |>
+  filter(!is.na(kelp_on_ARKEV)) |>
+  group_by(site, date) |>
+  mutate(
+    mean = mean(kelp_on_ARKEV, na.rm = TRUE),
+    se = sd(kelp_on_ARKEV, na.rm = TRUE) / sqrt(length(kelp_on_ARKEV))
+  )
+
+View(bydate)
+
+```
+
+
+
+```{r}
+ggplot(bydate, aes(x = date, y = mean, color = site, group = site)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, size=0.5) +
+   scale_x_date(
+    date_breaks = "1 month",        # one tick per month
+    date_labels = "%b"              # short month names: Jan, Feb, Mar
+  ) +
+  labs(
+    title = "Spliced Sporophytes per ARKEV by Site",
+    x = "Month",
+    y = "Mean # Spliced Individuals",
+    color = "Site"
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA)  # starts at 0, automatic upper limit
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 0, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+
+
+
+
+```{r}
+bydate_br <- br_kelp |>
+  mutate(
+    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  ) |>
+  distinct(site, date, ARKEV_unit, .keep_all = TRUE) |>
+  filter(!is.na(kelp_on_ARKEV)) |>
+  group_by(site, date) |>
+  mutate(
+    mean = mean(kelp_on_ARKEV, na.rm = TRUE),
+    se = sd(kelp_on_ARKEV, na.rm = TRUE) / sqrt(length(kelp_on_ARKEV))
+  )
+
+View(bydate_br)
+```
+
+```{r}
+ggplot(bydate_br, aes(x = date, y = mean, color = site, group = site)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, size=0.5) +
+   scale_x_date(
+    date_breaks = "1 month",        # one tick per month
+    date_labels = "%b"              # short month names: Jan, Feb, Mar
+  ) +
+  labs(
+    title = "Number of Spliced Sporophytes per ARKEV",
+    x = "Month",
+    y = "Mean # Spliced Individuals",
+    color = "Site"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 60, hjust = 1, vjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##Noyo Survivorship by Plot
+```{r}
+noyo_plot <- noyo_kelp |>
+  mutate(
+    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  ) |>
+  distinct(date, ARKEV_unit, .keep_all = TRUE) |>
+  mutate(plot = str_extract(ARKEV_unit, "\\d+")) |>
+  mutate(plot = fct_relevel(plot,
+                            "1",
+                            "2",
+                            "3",
+                            "4"
+                            )) |>
+    group_by(date, plot) |>
+  mutate(mean = mean(kelp_on_ARKEV),
+         se = sd(kelp_on_ARKEV)/sqrt(length(kelp_on_ARKEV))) 
+
+
+```
+
+
+```{r}
+ggplot(noyo_plot, aes(x = date, y = mean, color = plot, group = plot)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, size=0.5) +
+  scale_x_date(
+    date_breaks = "1 month",        # one tick per month
+    date_labels = "%b"              # short month names: Jan, Feb, Mar
+  ) +
+  labs(
+    title = "Number of Spliced Sporophytes per ARKEV",
+    x = "Month",
+    y = "Mean # Spliced Individuals",
+    color = "Noyo Plots"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+
+
+##Stipe Length
+
+```{r}
+stipe <- br_kelp |>
+  mutate(
+    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  ) |>
+  distinct(site, date, ARKEV_unit, .keep_all = TRUE) |>
+  filter(!is.na(stipe_length)) |>
+  group_by(site, date) |>
+  mutate(avg_length = mean(stipe_length),
+            se = sd(stipe_length)/sqrt(length(stipe_length)))
+
+  
+```
+
+
+
+
+```{r}
+ggplot(stipe, aes(x = date, y = avg_length, color = site, group = site)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  geom_errorbar(aes(ymin = avg_length - se, ymax = avg_length + se), width = 0.2, size=0.5) +
+  scale_x_date(
+    date_breaks = "1 month",        # one tick per month
+    date_labels = "%b"              # short month names: Jan, Feb, Mar
+  ) +
+  labs(
+    title = "Growth of Spliced Sporophytes",
+    x = "Month",
+    y = "Mean Stipe Length (cm)",
+    color = "Site"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+
+
+
+```{r}
+both_stipe <- full_kelp |>
+   mutate(
+    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  ) |>
+  distinct(site, date, ARKEV_unit, .keep_all = TRUE) |>
+  filter(!is.na(stipe_length)) |>
+  group_by(site, date) |>
+  mutate(avg_length = mean(stipe_length),
+            se = sd(stipe_length)/sqrt(length(stipe_length))) 
+
+ 
+```
+
+
+
+
+```{r}
+ggplot(both_stipe, aes(x = date, y = avg_length, color = site, group = site)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  geom_errorbar(aes(ymin = avg_length - se, ymax = avg_length + se), width = 0.2, size=0.5) +
+  scale_x_date(
+    date_breaks = "1 month",        # one tick per month
+    date_labels = "%b"              # short month names: Jan, Feb, Mar
+  ) +
+  labs(
+    title = "Growth of Spliced Sporophytes",
+    x = "Month",
+    y = "Mean Stipe Length (cm)",
+    color = "Site"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+

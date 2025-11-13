@@ -1,0 +1,963 @@
+#Grazer assaay
+```{r}
+library(csvread)
+setwd("C:/Users/bmbug/OneDrive/Documents/MLML recovered/Bull Kelp Project/data/2025")
+getwd()
+GA = read.csv("Grazer assay surveys.csv", header =TRUE)
+
+library(dplyr)
+library(tidyr)
+GA = GA %>%
+  mutate_at(c(11:14), as.numeric)%>%
+  mutate(DATE = as.Date(DATE, format = "%m/%d/%Y"))%>%
+  mutate(TIME = as.character(TIME))%>%
+  mutate(SEA.URCHIN = PURPLE.SEA.URCHIN + RED.SEA.URCHIN)%>%
+  mutate(Treatment = paste(DRIFT.ADDED, ARKEV, sep = " & "))
+str(GA)
+```
+
+  
+#urchin means
+```{r}
+library(tidyr)
+library(dplyr)
+
+overall_means <- GA %>%
+  summarise(
+    mean_purple = mean(PURPLE.SEA.URCHIN, na.rm = TRUE),
+    mean_red    = mean(RED.SEA.URCHIN, na.rm = TRUE),
+    mean_urchin = mean(SEA.URCHIN, na.rm = TRUE)
+  )
+
+urchin_summary = GA %>%
+  group_by(DATE, ARKEV, Treatment)
+
+#calculate densities by treatment
+urchin_den_arkev = urchin_summary %>%
+  group_by(Treatment)%>%
+  summarise(mean_pu_den = mean(PURPLE.SEA.URCHIN, na.rm = TRUE),
+            se_pu_den = sd(PURPLE.SEA.URCHIN, na.rm = TRUE)/sqrt(n()),
+            mean_ru_den = mean(RED.SEA.URCHIN, na.rm = TRUE),
+            se_ru_den = sd(RED.SEA.URCHIN, na.rm = TRUE)/sqrt(n()),
+            mean_urchin_den = mean(SEA.URCHIN, na.rm = TRUE),
+            se_urchin_den = sd(SEA.URCHIN, na.rm = TRUE)/ sqrt(n()),
+            n= n()) %>%
+  ungroup()
+```
+
+
+#Density by arkev
+```{r}
+library(ggplot2)
+
+ggplot(urchin_den_arkev, aes(x = Treatment, y = mean_urchin_den)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), color = "black") +
+  geom_errorbar(
+    aes(ymin = mean_urchin_den - se_urchin_den, ymax = mean_urchin_den + se_urchin_den),
+    width = 0.2,
+    position = position_dodge(width = 0.8)
+  ) +
+  labs(
+    title = "Sea Urchin Density by Treatment",
+    x = "Treatment",
+    y = "Mean Sea Urchin Density (#/m²)",
+    fill = "Drift Added"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold", angle = 25, hjust = 1, vjust=1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size=12, face= "bold"),
+    legend.text = element_text(size=12, face= "bold"))
+```
+
+```{r}
+urchin_data <- GA %>%
+  filter(!is.na(SEA.URCHIN)) %>%
+  mutate(Treatment = as.factor(Treatment))
+
+urchin_data %>%
+  group_by(Treatment) %>%
+  summarise(p_value = shapiro.test(SEA.URCHIN)$p.value)
+
+library(car)
+leveneTest(SEA.URCHIN ~ Treatment, data = urchin_data)
+```
+
+#urchin density by treatment
+```{r}
+kruskal.test(SEA.URCHIN ~ Treatment, data = urchin_data)
+
+# Post-hoc pairwise Wilcoxon tests
+pairwise.wilcox.test(urchin_data$SEA.URCHIN, urchin_data$Treatment,
+                     p.adjust.method = "BH")
+```
+
+```{r}
+urchin_aov <- aov(SEA.URCHIN ~ Treatment, data = urchin_data)
+summary(urchin_aov)
+
+# Post-hoc pairwise differences
+urchin_tuk <- TukeyHSD(urchin_aov)
+urchin_tuk
+```
+
+```{r}
+library(multcompView)
+library(ggplot2)
+
+# Tukey HSD and letters
+urchin_tuk <- TukeyHSD(urchin_aov)
+
+# Get letters (compact letter display)
+urchin_cld <- multcompLetters4(urchin_aov, urchin_tuk)
+
+# Extract only the letters as a named vector
+letters_vec <- urchin_cld$Treatment$Letters
+
+# Convert to a tidy data frame
+letters_df <- data.frame(
+  Treatment = names(letters_vec),
+  TukeyLetters = letters_vec,
+  stringsAsFactors = FALSE
+)
+
+# Merge with your summary
+urchin_den_arkev <- urchin_den_arkev %>%
+  left_join(letters_df, by = "Treatment")
+
+# Plot
+ggplot(urchin_den_arkev, aes(x = Treatment, y = mean_urchin_den)) +
+  geom_bar(stat = "identity", fill = "gray30", color = "black") +
+  geom_errorbar(aes(ymin = mean_urchin_den - se_urchin_den,
+                    ymax = mean_urchin_den + se_urchin_den),
+                width = 0.2) +
+  geom_text(aes(label = TukeyLetters), vjust = -1.25, size = 6, fontface = "bold") +
+  labs(
+    title = "Sea Urchin Density by Treatment",
+    x = "Treatment",
+    y = "Mean Urchin Density (#/m²)"
+  ) +
+  theme_classic(base_size = 14)
+```
+
+
+#percent change in urchin density
+```{r}
+urchin_means <- GA %>%
+  filter(TIME %in% c(0, 24)) %>%
+  group_by(Month, Treatment, TIME) %>%
+  summarise(
+    mean_purple = mean(PURPLE.SEA.URCHIN, na.rm = TRUE),
+    se_purple = sd(PURPLE.SEA.URCHIN, na.rm = TRUE)/sqrt(n()),
+    mean_red = mean(RED.SEA.URCHIN, na.rm = TRUE),
+    se_red  = sd(RED.SEA.URCHIN, na.rm = TRUE)/ sqrt(n()),
+    mean_urchin = mean(SEA.URCHIN, na.rm = TRUE),
+    se_urchin = sd(SEA.URCHIN, na.rm = TRUE)/ sqrt(n()),
+    .groups = "drop"
+  )%>%
+  pivot_wider(
+    names_from = TIME,
+    values_from = c(mean_purple, mean_red, se_purple, se_red, mean_urchin, se_urchin),
+    names_prefix = "t"
+  ) %>%
+  mutate(
+    purple_change = ifelse(mean_purple_t0 == 0, NA, ((mean_purple_t24 - mean_purple_t0)/mean_purple_t0)*100),
+    red_change    = ifelse(mean_red_t0 == 0, NA, ((mean_red_t24 - mean_red_t0)/mean_red_t0)*100),
+    urchin_change = ifelse(mean_urchin_t0 == 0, NA, ((mean_urchin_t24 - mean_urchin_t0)/mean_urchin_t0)*100)
+  )
+
+```
+
+```{r}
+#long format
+urchin_long <- urchin_means %>%
+  pivot_longer(
+    cols = c(purple_change, red_change, urchin_change),
+    names_to = "Urchin_type",
+    values_to = "Percent_change"
+  )
+
+#bar plot
+ggplot(urchin_long, aes(x = Treatment, y = Percent_change, fill = Urchin_type)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("purple_change" = "purple", "red_change" = "red","urchin_change" = "darkgray")) +
+  facet_wrap(~Month) +
+  labs(
+    y = "Percent Change (0 → 24 hr)",
+    x = "Treatment",
+    fill = "Urchin Type"
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle= 45, hjust = 1, vjust= 1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+#log transformed change in urchin densities
+```{r}
+eps <- 0.01 
+
+urchin_means_eps <- urchin_means %>%
+  mutate(
+    # log-transformed fold change: log10((t24 + eps) / (t0 + eps))
+    log_purple_change = log10((mean_purple_t24 + eps) / (mean_purple_t0 + eps)),
+    log_red_change = log10((mean_red_t24 + eps) / (mean_red_t0 + eps)),
+    log_urchin_change = log10((mean_urchin_t24 +eps) / (mean_urchin_t0 + eps))
+  )
+
+log_urchin_means_summary <- urchin_means_eps %>%
+  group_by(Month, Treatment) %>%
+  summarise(
+    mean_log_purple = mean(log_purple_change, na.rm = TRUE),
+    se_log_purple = sd(log_purple_change, na.rm = TRUE) / sqrt(sum(!is.na(log_purple_change))),
+    mean_log_red = mean(log_red_change, na.rm = TRUE),
+    se_log_red = sd(log_red_change, na.rm = TRUE) / sqrt(sum(!is.na(log_red_change))),
+    mean_log_urchin = mean(log_urchin_change, na.rm = TRUE),
+    se_log_urhcin = sd(log_urchin_change, na.rm= TRUE) / sqrt(sum(!is.na(log_urchin_change))),
+    .groups = "drop"
+  )
+
+library(tidyr)
+
+log_urchin_long <- log_urchin_means_summary %>%
+  pivot_longer(
+    cols = starts_with("mean_"),
+    names_to = "urchin_type",
+    values_to = "mean_change"
+  ) %>%
+  mutate(
+    se_change = case_when(
+      urchin_type == "mean_log_purple" ~ se_log_purple,
+      urchin_type == "mean_log_red" ~ se_log_red,
+      urchin_type == "mean_log_urchin" ~ se_log_urhcin
+    ),
+    urchin_type = case_when(
+      urchin_type == "mean_log_purple" ~ "Purple Sea Urchin",
+      urchin_type == "mean_log_red" ~ "Red Sea Urchin",
+      urchin_type == "mean_log_urchin" ~ "Sea Urchin"
+    )
+  )
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(log_urchin_long, aes(x = Treatment, y = mean_change, fill = urchin_type)) +
+  geom_col(position = position_dodge(width = 0.8), color = "black", width = 0.7) +
+  geom_errorbar(
+    aes(ymin = mean_change - se_change, ymax = mean_change + se_change),
+    width = 0.2,
+    position = position_dodge(width = 0.8)
+  ) +
+  facet_wrap(~Month, nrow = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed") +  # 0 = no change
+  labs(
+    title = "Change in Urchin Density (0 → 24 hr)",
+    x = "Treatment",
+    y = "Log10 Change in Densities",
+    fill = "Urchin Type"
+  ) + 
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("Purple Sea Urchin" = "purple", "Red Sea Urchin" = "red")) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle= 45, hjust = 1, vjust= 1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "right"
+  )
+  
+```
+
+
+#change in density by quad
+```{r}
+#analyze by quads
+eps <- 0.01  # to avoid log(0)
+
+quad_change <- GA %>%
+  filter(TIME %in% c(0, 24)) %>%
+  group_by(Month, ARKEV, DRIFT.ADDED, Treatment, QUAD, TIME) %>%
+  summarise(
+    mean_urchin = mean(SEA.URCHIN, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = TIME,
+    values_from = mean_urchin,
+    names_prefix = "t"
+  ) %>%
+  mutate(
+    # log10 fold change from 0 to 24 hr
+    log_urchin_change = log10((t24 + eps) / (t0 + eps)),
+    # extract numeric distance from QUAD (BAR = 0)
+    Distance_m = case_when(
+      QUAD == "BAR" ~ 0,
+      TRUE ~ as.numeric(str_extract(QUAD, "\\d+"))
+    )
+  )
+
+str(quad_change)
+
+```
+
+
+
+library(ggplot2)
+
+ggplot(quad_change, aes(x = Distance_m, y = log_urchin_change, color = Treatment)) +
+  geom_point(position = position_jitter(width = 0.2, height = 0), size = 3) +
+  geom_line(aes(group = QUAD), alpha = 0.5) +
+  facet_wrap(~Month, nrow = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    title = "Quadrat-level Log Fold Change in Purple Urchin Density",
+    x = "Distance from BAR (m)",
+    y = "Log10 Fold Change (t24 / t0)",
+    color = "Treatment"
+  ) +
+  theme_classic(base_size = 14)
+
+ggplot(quad_change, aes(x = factor(Distance_m), y = log_urchin_change, fill = Treatment)) +
+  geom_boxplot(position = position_dodge(width = 0.8)) +
+  facet_wrap(~Month, nrow = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    title = "Change in Purple Urchin Density",
+    x = "Distance from GA BAR (m)",
+    y = "Log10 Fold Change",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 14)
+
+
+
+
+eps <- 0.01
+
+quad_summary <- quad_change %>%
+  # ensure BAR = 0
+  mutate(
+     Distance_m = case_when(
+      QUAD == "BAR" ~ 0,
+      TRUE ~ as.numeric(str_extract(QUAD, "\\d+"))
+    ),
+    # log fold change
+    log_purple_change = log10((mean_purple_t24 + eps) / (mean_purple_t0 + eps)),
+    log_red_change = log10((mean_red_t24 + eps) / (mean_red_t0 + eps)),
+    log_urchin_change = log10((mean_urchin_t24 + eps) / (mean_urchin_t0 + eps)),
+  ) %>%
+  group_by(Month, DRIFT.ADDED, Distance_m) %>%
+  summarise(
+    mean_purple = mean(log_purple_change, na.rm = TRUE),
+    se_purple   = sd(log_purple_change, na.rm = TRUE)/sqrt(sum(!is.na(log_purple_change))),
+    mean_red    = mean(log_red_change, na.rm = TRUE),
+    se_red      = sd(log_red_change, na.rm = TRUE)/sqrt(sum(!is.na(log_red_change))),
+    mean_urchin = mean(log_urchin_change, na.rm = TRUE),
+    se_urchin = sd(log_urchin_change, na.rm= TRUE) / sqrt(sum(!is.na(log_urchin_change))),
+    .groups = "drop"
+  ) %>%
+  # pivot longer for combined plotting
+  pivot_longer(
+    cols = c(mean_purple, mean_red, mean_urchin),
+    names_to = "Urchin_Type",
+    values_to = "Mean_LogChange"
+  ) %>%
+  mutate(
+    SE = case_when(
+      Urchin_Type == "mean_purple" ~ se_purple,
+      Urchin_Type == "mean_red"    ~ se_red,
+      Urchin_Type == "mean_urchin" ~ se_urchin
+    ),
+    Urchin_Type = case_when(
+      Urchin_Type == "mean_purple" ~ "Purple Sea Urchin",
+      Urchin_Type == "mean_red"    ~ "Red Sea Urchin",
+      Urchin_Type == "mean_urchin" ~ "Sea Urchin"
+    )
+  )
+
+
+library(ggplot2)
+
+ggplot(quad_summary, aes(x = Distance_m, y = Mean_LogChange, color = Urchin_Type, shape = DRIFT.ADDED)) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(ymin = Mean_LogChange - SE, ymax = Mean_LogChange + SE),
+                width = 0.2, position = position_dodge(width = 0.3)) +
+  facet_wrap(~Month, nrow = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    title = "Change in Urchin Density ",
+    x = "Distance from GA BAR (m)",
+    y = "24 HR Change (log10)",
+    color = "Urchin Type"
+  ) +
+  theme_classic(base_size = 14) +
+  scale_color_manual(values = c("Purple Sea Urchin" = "purple", "Red Sea Urchin" = "red", "Sea Urchin" = "black"))
+
+ggplot(distance_summary, aes(x = Distance_m, y = mean, color = Urchin_type, shape = Treatment)) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), 
+              position = position_dodge(width = 0.5), width = 0.5) +
+  geom_line(position = position_dodge(width = 0.5), width = 0.5) +
+  scale_color_manual(values = c("purple", "red", "black")) +
+  labs(
+    x = "Distance from GA Bar (m)",
+    y = "Log10 Fold Change (24 hr / 0 hr)",
+    color = "Urchin Type"
+  ) +
+   theme_classic(base_size = 14)
+
+
+```{r}
+#combine urchin densities, connect points, change legend to focus on drift
+
+library(dplyr)
+
+distance_summary <- quad_change %>%
+  group_by(Treatment, DRIFT.ADDED, Distance_m) %>%
+  summarise(
+    mean_log_urchin = mean(log_urchin_change, na.rm = TRUE),
+    se_log_urchin   = sd(log_urchin_change, na.rm = TRUE) / sqrt(sum(!is.na(log_urchin_change))),
+    .groups = "drop"
+  )
+
+ggplot(distance_summary, aes(x = Distance_m, y = mean_log_urchin, color = Treatment)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean_log_urchin - se_log_urchin,
+                    ymax = mean_log_urchin + se_log_urchin),
+                width = 0.4, size = 1) +
+  geom_line(aes(group = Treatment), size = 1) +
+  labs(
+    title = "Change in Total Sea Urchin Density (# per m²)",
+    x = "Distance from GA Bar (m)",
+    y = "Log10 Fold Change (24 hr / 0 hr)",
+    color = "Treatment"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 15, face = "bold"),
+    legend.text = element_text(size = 12, face = "bold")
+  )
+```
+
+```{r}
+# Make sure Treatment is a factor
+quad_change <- quad_change %>%
+  mutate(Treatment = factor(Treatment),
+         Distance_m = factor(Distance_m))
+
+
+within_treatment_tests <- quad_change %>%
+  group_by(Treatment) %>%
+  do({
+    model <- aov(log_urchin_change ~ Distance_m, data = .)
+    data.frame(
+      Treatment = unique(.$Treatment),
+      p_value = summary(model)[[1]][["Pr(>F)"]][1]
+    )
+  })
+
+within_treatment_tests
+```
+
+
+```{r}
+library(broom)
+
+tukey_within_treatment <- quad_change %>%
+  group_by(Treatment) %>%
+  do({
+    model <- aov(log_urchin_change ~ Distance_m, data = .)
+    if(length(unique(.$Distance_m[!is.na(.$log_urchin_change)])) > 1) {
+      broom::tidy(TukeyHSD(model))
+    } else {
+      tibble(term = "Distance_m", contrast = NA, p.adj = NA)
+    }
+  })
+
+tukey_within_treatment
+
+```
+
+```{r}
+within_distance_tests <- quad_change %>%
+  group_by(Distance_m) %>%
+  do({
+    model <- aov(log_urchin_change ~ Treatment, data = .)
+    data.frame(
+      Distance_m = unique(.$Distance_m),
+      p_value = summary(model)[[1]][["Pr(>F)"]][1]
+    )
+  })
+
+within_distance_tests
+```
+
+```{r}
+tukey_within_distance <- quad_change %>%
+  group_by(Distance_m) %>%
+  do({
+    model <- aov(log_urchin_change ~ Treatment, data = .)
+    broom::tidy(TukeyHSD(model))
+  })
+
+tukey_within_distance
+
+```
+
+```{r}
+urchin_change_aov <- aov(log_urchin_change ~ Treatment + Distance_m, data = quad_change)
+
+summary(urchin_change_aov)
+TukeyHSD(urchin_change_aov)
+```
+
+```{r}
+library(multcompView)
+library(dplyr)
+
+letters_within_treatment <- quad_change %>%
+  group_by(Treatment) %>%
+  do({
+    model <- aov(log_urchin_change ~ Distance_m, data = .)
+    tukey <- TukeyHSD(model)
+    cld <- multcompLetters4(model, tukey)
+    data.frame(
+      Distance_m = names(cld$Distance_m$Letters),
+      Letters = cld$Distance_m$Letters,
+      Treatment = unique(.$Treatment)
+    )
+  }) %>%
+  ungroup()
+
+letters_within_treatment
+
+letters_within_distance <- quad_change %>%
+  group_by(Distance_m) %>%
+  do({
+    model <- aov(log_urchin_change ~ Treatment, data = .)
+    tukey <- TukeyHSD(model)
+    cld <- multcompLetters4(model, tukey)
+    data.frame(
+      Treatment = names(cld$Treatment$Letters),
+      Letters = cld$Treatment$Letters,
+      Distance_m = unique(.$Distance_m)
+    )
+  }) %>%
+  ungroup()
+
+letters_within_distance
+```
+
+```{r}
+# Ensure consistent type across data frames
+distance_urchin <- distance_urchin %>%
+  mutate(Distance_m = as.character(Distance_m))
+
+letters_within_treatment <- letters_within_treatment %>%
+  mutate(Distance_m = as.character(Distance_m))
+
+letters_within_distance <- letters_within_distance %>%
+  mutate(Distance_m = as.character(Distance_m))
+
+distance_urchin_cld <- distance_urchin %>%
+  left_join(letters_within_treatment, by = c("Treatment", "Distance_m")) %>%
+  left_join(letters_within_distance, by = c("Treatment", "Distance_m"), suffix = c("_within_treat", "_within_dist"))
+```
+
+```{r}
+ggplot(distance_urchin_cld, aes(x = Distance_m, y = mean, color = Treatment)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.3) +
+  geom_line(aes(group = Treatment)) +
+  geom_text(aes(label = Letters_within_treat), 
+            vjust = -1.2,
+            hjust = 1,
+            size = 5, 
+            fontface = "bold") +
+  labs(
+    title = "Change in Total Sea Urchin Density (# per m²)",
+    x = "Distance from GA Bar (m)",
+    y = "Log10 Fold Change (24 hr / 0 hr)",
+    color = "Treatment"
+  )+
+  theme_bw(base_size = 14) +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 15, face = "bold"),
+    legend.text = element_text(size = 12, face = "bold")
+  )
+  
+```
+
+
+
+#urchin densities by location
+```{r}
+library(sf)
+library(dplyr)
+
+# Purple urchins
+purple_sf <- GA %>%
+  group_by(Month, Plot, ID, DRIFT.ADDED) %>%
+  summarise(
+    Density = mean(PURPLE.SEA.URCHIN, na.rm = TRUE),
+    LAT = mean(LAT, na.rm = TRUE),
+    LONG = mean(LONG, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  st_as_sf(coords = c("LONG", "LAT"), crs = 4326)  # WGS84
+
+red_sf <- GA %>%
+  group_by(Month, Plot, ID, DRIFT.ADDED) %>%
+  summarise(
+    Density = mean(RED.SEA.URCHIN, na.rm = TRUE),
+    LAT = mean(LAT, na.rm = TRUE),
+    LONG = mean(LONG, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  st_as_sf(coords = c("LONG", "LAT"), crs = 4326)
+
+library(ggplot2)
+
+ggplot(purple_sf) +
+  geom_sf(aes(color = DRIFT.ADDED, size = Density), alpha = 0.8) +
+  facet_wrap(~Month, nrow = 1) +
+  scale_color_manual(values = c("NO" = "gray", "YES" = "forestgreen"), name = "Drift Added") +
+  scale_size_continuous(range = c(1, 5), name = "Density (urchins/m²)") +
+  labs(
+    title = "Purple Urchin Density by ARKEV",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_classic(base_size = 14)
+```
+
+```{r}
+library(ggplot2)
+
+plot_urchins <- function(sf_data, month_name, species_name) {
+  month_data <- sf_data %>% filter(Month == month_name)
+  
+  ggplot(month_data) +
+    geom_sf(aes(color = DRIFT.ADDED, size = Density), alpha = 0.8) +
+    scale_color_manual(values = c("NO" = "gray", "YES" = "forestgreen"), name = "Drift Added") +
+    scale_size_continuous(range = c(3, 7), name = "Density (urchins/m²)") +
+    labs(
+      title = paste(species_name, "Density —", month_name),
+      x = "Longitude",
+      y = "Latitude"
+    ) +
+    theme_classic(base_size = 14)
+}
+
+months <- unique(purple_sf$Month)
+purple_plots <- lapply(months, function(m) plot_urchins(purple_sf, m, "Purple Urchin"))
+print(purple_plots)
+```
+
+
+
+
+#Kelp weight
+```{r}
+kelp_weight = read.csv("GA_kelp_weights.csv", header=TRUE)
+
+kelp_weight <- kelp_weight %>%
+  mutate(Date = as.Date(Date, format = "%m/%d/%Y"))%>%
+  mutate(Month = month(Date, label = TRUE, abbr = TRUE))%>%
+  mutate(Kelp.weight = as.numeric(Kelp.weight))
+str(kelp_weight)
+
+KW_noaug <- kelp_weight %>%
+  filter(Month != "Aug")
+
+str(KW_noaug)
+```
+```{r}
+unique(kelp_weight$Time)
+
+kelp_weight %>%
+  count(Month, ARKEV, Drift, Time) %>%
+  pivot_wider(names_from = Time, values_from = n, values_fill = 0)
+
+kelp_weight %>%
+  summarise(n = n(), .by = c(Month, ARKEV, Drift, Time)) %>%
+  filter(n > 1)
+```
+
+
+
+```{r}
+#calculate percent change to standardize across months
+
+#calc mean and se weight for month
+weight_change_month <- kelp_weight %>%
+  group_by(Month, ARKEV, Drift, Time) %>%
+  summarise(
+    mean_weight = mean(Kelp.weight, na.rm = TRUE),
+    se_weight = sd(Kelp.weight, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = Time, values_from = c(mean_weight, se_weight)) %>%
+  mutate(
+    Treatment = paste(Drift, ARKEV, sep = " & "),
+    # Percent change: ((Post - Pre) / Pre) * 100
+    weight_change = ((mean_weight_Post - mean_weight_Pre) / mean_weight_Pre) * 100,
+    # Approximate SE propagation (in % units)
+    weight_se = sqrt(se_weight_Post^2 + se_weight_Pre^2) / mean_weight_Pre * 100
+  )
+
+
+#Calculate overall
+weight_change <- kelp_weight %>%
+  group_by(ARKEV, Drift, Time) %>%
+  summarise(
+    mean_weight = mean(Kelp.weight, na.rm = TRUE),
+    se_weight = sd(Kelp.weight, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = Time, values_from = c(mean_weight, se_weight)) %>%
+  mutate(
+    Treatment = paste(Drift, ARKEV, sep = " & "),
+    weight_change = ((mean_weight_Post - mean_weight_Pre) / mean_weight_Pre) * 100,
+    weight_se = sqrt(se_weight_Post^2 + se_weight_Pre^2) / mean_weight_Pre * 100
+  )
+
+```
+
+```{r}
+#plot
+ggplot(weight_change_month, aes(x = Treatment, y = weight_change, fill = Drift)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = weight_change - weight_se, ymax = weight_change + weight_se),
+                width = 0.2, position = position_dodge(0.9)) +
+  facet_wrap(~Month) +
+  labs(title = "24 hr Change in Grazer Assay Kelp Weight (g)",
+       x = "Treatment",
+       y = "Percent Change in Kelp Weight (g)"
+       ) +
+  scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & ARKEV", "DRIFT & ARKEV")) + 
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 60, hjust = 0.5, vjust= 0.5),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "top"
+  )
+
+
+ggplot(weight_change, aes(x = Treatment, y = weight_change)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = weight_change - weight_se, ymax = weight_change + weight_se),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "24 hr Change in Grazer Assay Kelp Weight (g)",
+       x = "Treatment",
+       y = "Percent Change in Kelp Weight (g)"
+       ) +
+   scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & ARKEV", "DRIFT & ARKEV")) + 
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", hjust = 0.5, vjust= 0.5),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "top"
+  )
+
+```
+
+```{r}
+library(car)
+#run anova
+ga_month_lm  <- lm(Kelp.weight ~ Month * Drift, data = kelp_weight)
+Anova(ga_month_lm, type = 3)
+
+#run anova
+ga_aov <- aov(Kelp.weight ~ ARKEV * Drift, data = kelp_weight)
+
+# Summary of the ANOVA result
+summary(ga_aov)
+```
+
+```{r}
+#run anova without august
+ga_noaug_lm <- lm(Kelp.weight ~ ARKEV * Drift, data = KW_noaug)
+Anova(ga_noaug_lm)
+```
+
+```{r}
+#calculate percent change without august
+
+noaug_weight_change <- KW_noaug %>%
+  group_by(ARKEV, Drift, Time) %>%
+  summarise(
+    mean_weight = mean(Kelp.weight, na.rm = TRUE),
+    se_weight = sd(Kelp.weight, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = Time, values_from = c(mean_weight, se_weight)) %>%
+  mutate(Treatment = paste(Drift, ARKEV, sep = " & "))
+
+# Calculate percent change and propagated SE
+noaug_weight_change <- noaug_weight_change %>%
+  mutate(
+    weight_change = ((mean_weight_Post - mean_weight_Pre) / mean_weight_Pre) * 100,
+    weight_se = sqrt(se_weight_Post^2 + se_weight_Pre^2) / mean_weight_Pre * 100
+  )
+
+str(noaug_weight_change)
+```
+
+```{r}
+ggplot(noaug_weight_change, aes(x = Treatment, y = weight_change)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = weight_change - weight_se, ymax = weight_change + weight_se),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(
+    title = " Change in Grazer Assay Kelp Weight (24 hr)",
+    x = "",
+    y = "Mean Change in Kelp Weight (%)"
+  ) +
+  scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & ARKEV", "DRIFT & ARKEV")) + 
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 15, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "top"
+  )
+```
+
+
+```{r}
+KW_noaug_summary <- KW_noaug %>%
+  group_by(Plot, ID, ARKEV, Drift, Time) %>%
+  summarise(mean_weight = mean(Kelp.weight, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = Time, values_from = mean_weight) %>%
+  mutate(weight_change = ((Post - Pre) / Pre) * 100,
+         Treatment = paste(Drift, ARKEV, sep = " & ")) %>%
+  drop_na(weight_change)
+str(KW_noaug_summary)
+
+anova_drift <- aov(weight_change ~ Drift, data = KW_noaug_summary)
+summary(anova_drift)
+
+anova_treatment <- aov(weight_change ~ Treatment, data = KW_noaug_summary)
+summary(anova_treatment)
+TukeyHSD(anova_treatment)
+
+```
+
+```{r}
+library(multcompView)
+
+# Extract Tukey results
+tukey_drift <- TukeyHSD(anova_drift)
+
+# Generate compact letter display
+cld_drift <- multcompLetters4(anova_drift, tukey_drift)
+
+# Create a clean letters data frame
+drift_letters_df <- data.frame(
+  Drift = names(cld_drift$Drift$Letters),
+  Letters = cld_drift$Drift$Letters
+)
+
+# Merge letters into the summary data
+KW_noaug_summary_letters <- KW_noaug_summary %>%
+  group_by(Drift) %>%
+  summarise(
+    mean_change = mean(weight_change, na.rm = TRUE),
+    se_change = sd(weight_change, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  left_join(drift_letters_df, by = "Drift")
+```
+
+```{r}
+ggplot(KW_noaug_summary_letters, aes(x = Drift, y = mean_change)) +
+  geom_bar(stat = "identity", fill = "forestgreen", alpha = 0.8) +
+  geom_errorbar(aes(ymin = mean_change - se_change, ymax = mean_change + se_change),
+                width = 0.2) +
+  geom_text(aes(label = Letters, y = mean_change + se_change + 5),
+            size = 6, fontface = "bold") +
+  theme_classic() +
+  labs(
+    title = "Change in Grazer Assay Kelp Weight by Drift Treatment",
+    x = "",
+    y = "Mean Change in Kelp Weight (%)"
+  ) +
+  theme(
+    axis.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+  )
+```
+
+```{r}
+# Plot with jittered points
+ggplot() +
+  # Individual points (raw data)
+  geom_jitter(
+    data = KW_noaug_summary,
+    aes(x = Drift, y = weight_change),
+    width = 0.1, size = 3, alpha = 0.6, color = "grey30"
+  ) +
+  # Bars for mean ± SE
+  geom_bar(
+    data = KW_noaug_summary_letters,
+    aes(x = Drift, y = mean_change),
+    stat = "identity", fill = "steelblue", alpha = 0.7, width = 0.6
+  ) +
+  geom_errorbar(
+    data = KW_noaug_summary_letters,
+    aes(x = Drift,
+        ymin = mean_change - se_change,
+        ymax = mean_change + se_change),
+    width = 0.15
+  ) +
+  # Letters above error bars
+  geom_text(
+    data = KW_noaug_summary_letters,
+    aes(x = Drift, y = mean_change + se_change + 5, label = Letters),
+    size = 6, fontface = "bold"
+  ) +
+  labs(
+    title = "Change in Kelp Weight by Drift Treatment",
+    x = "",
+    y = "Mean Change in Kelp Weight (%)"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+  )
+```

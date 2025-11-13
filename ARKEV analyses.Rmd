@@ -1,0 +1,642 @@
+---
+title: "ARKEV analyses"
+output: pdf_document
+date: "2025-10-24"
+---
+```{r}
+library(csvread)
+getwd()
+MASTER = read.csv("BR ARKEV survey data.csv", header = TRUE)
+MASTER <- MASTER %>%
+  mutate(count = as.numeric(MASTER$count))%>%
+  mutate(percent = as.numeric(MASTER$percent))%>%
+  mutate(Date = make_date(year, month, day)) %>%
+  mutate(
+    depth_ft = as.numeric(depth_ft),
+    size_cm = as.numeric(size_cm)
+  )
+str(MASTER)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+kelp_data_full <- MASTER%>%
+  filter(data_type == "kelp")%>%
+  # Fill in missing combos of ARKEV_type × Date × species_code
+  complete(month, day, year, ARKEV_type, ARKEV_unit, data_type, Date, species_code, fill = list(count = 0))
+
+  
+
+kelp_summary_full <- kelp_data_full %>%
+  group_by(ARKEV_type, Date) %>%
+  summarise(
+    mean_count = mean(count, na.rm = TRUE),
+    se_count = sd(count, na.rm = TRUE) / sqrt(sum(!is.na(count))),
+    .groups = "drop"
+  )
+
+kelp_data <-  MASTER%>%
+  filter(data_type == "kelp")%>%
+  filter(month != 10) %>%
+  # Fill in missing combos of ARKEV_type × Date × species_code
+  complete(month, day, year, ARKEV_type, ARKEV_unit, data_type, Date, species_code, fill = list(count = 0))
+
+kelp_summary <- kelp_data %>%
+  group_by(ARKEV_type, Date) %>%
+  summarise(
+    mean_count = mean(count, na.rm = TRUE),
+    se_count = sd(count, na.rm = TRUE) / sqrt(sum(!is.na(count))),
+    .groups = "drop"
+  )
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(kelp_summary_full, aes(x = Date, y = mean_count, color = ARKEV_type, group = ARKEV_type)) +
+  geom_point(position = position_dodge(width = 0.8), size = 2) +
+  geom_line(size=1)+
+  geom_errorbar(
+    aes(ymin = mean_count - se_count, ymax = mean_count + se_count),
+    position = position_dodge(width = 0.8),
+    width = 0.3, size=1
+  ) +
+  labs(
+    title = "Kelp Counts by ARKEV Presence",
+    x = "Date",
+    y = "Mean Kelp Count (per m^2)",
+    fill = "Site Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold", hjust = 0.5, vjust=1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size=12, face= "bold"),
+    legend.text = element_text(size=12, face= "bold"))
+
+
+ggplot(kelp_summary, aes(x = Date, y = mean_count, color = ARKEV_type, group = ARKEV_type)) +
+  geom_point(position = position_dodge(width = 0.8), size = 2) +
+  geom_line(size=1)+
+  geom_errorbar(
+    aes(ymin = mean_count - se_count, ymax = mean_count + se_count),
+    position = position_dodge(width = 0.8),
+    width = 0.3, size=1
+  ) +
+  labs(
+    title = "Kelp Counts by ARKEV Presence",
+    x = "Date",
+    y = "Mean Kelp Count (per m^2)",
+    fill = "Site Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold", hjust = 0.5, vjust=1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size=12, face= "bold"),
+    legend.text = element_text(size=12, face= "bold"))
+```
+```{r}
+kelp_total_abundance <- kelp_summary %>%
+  group_by(ARKEV_type) %>%
+  summarise(
+    mean_count = mean(mean_count, na.rm = TRUE),                 # average over dates
+    se_count = sqrt(sum(se_count^2) / n()),                     # combine SE across dates
+    .groups = "drop"
+  )
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(kelp_total_abundance, aes(x = ARKEV_type, y = mean_count)) +
+  geom_col(color = "black", show.legend = FALSE) +
+  geom_errorbar(aes(ymin = mean_count - se_count, ymax = mean_count + se_count),
+                width = 0.3, color = "black") +
+  labs(
+    title = "Overall Mean Kelp Abundance by ARKEV Type",
+    x = "ARKEV Type",
+    y = "Mean Kelp Count (per m²)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+  )
+```
+
+```{r}
+kelp_species_summary <- kelp_data %>%
+  filter(!species_code %in% c("NO_KELP", "STUMP")) %>%
+  group_by(Date, ARKEV_type, species_code) %>%
+  summarise(
+    mean_count = mean(count, na.rm = TRUE),
+    se_count = sd(count, na.rm = TRUE) / sqrt(sum(!is.na(count))),
+    .groups = "drop"
+  )
+
+kelp_monthly <- kelp_species_summary %>%
+  group_by(Date, ARKEV_type) %>%
+  mutate(
+    percent_count = (mean_count / sum(mean_count)) * 100
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(kelp_species_summary, aes(x = Date, y = mean_count, fill = species_code)) +
+  geom_col(position = "stack", color = "black") +
+  facet_wrap(~ ARKEV_type) +
+  labs(
+    title = "Kelp Species Composition by ARKEV Type Over Time",
+    x = "Date",
+    y = "Mean Kelp Count (per m²)",
+    fill = "Species Code"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold", angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 12, face = "bold")
+  )
+
+library(ggplot2)
+
+ggplot(kelp_monthly, aes(x = Date, y = percent_count, fill = species_code)) +
+  geom_col(color = "black", position = "stack") +
+  facet_wrap(~ ARKEV_type) +
+  labs(
+    title = "Relative Kelp Species Composition",
+    x = "Month",
+    y = "Percent of Total Kelp (%)",
+    fill = "Species Code"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold", angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1))
+
+
+```
+
+```{r}
+kelp_total <- kelp_data %>%
+  group_by(ARKEV_type, species_code) %>%
+  summarise(
+    mean_count = mean(count, na.rm = TRUE), 
+    se_count = sd(count, na.rm = TRUE)/ sqrt(n()),
+    .groups = "drop"
+  )
+
+kelp_total <- kelp_total %>%
+  group_by(ARKEV_type) %>%
+  mutate(
+    percent_count = (mean_count / sum(mean_count)) * 100
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(kelp_total, aes(x = ARKEV_type, y = percent_count, fill = species_code)) +
+  geom_col(color = "black") +
+  labs(
+    title = "Overall Relative Kelp Species Composition by ARKEV Type",
+    x = "ARKEV Type",
+    y = "Percent of Total Kelp (%)",
+    fill = "Species Code"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 12, face = "bold")
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1))
+
+
+ggplot(kelp_total, aes(x = ARKEV_type, y = mean_count, fill = species_code)) +
+  geom_col(position = "stack", color = "black") +
+  labs(
+    title = "Mean Kelp Species Abundance by ARKEV Type",
+    x = "ARKEV Type",
+    y = "Mean Kelp Count (per m²)",
+    fill = "Species Code"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 12, face = "bold")
+  )
+
+```
+
+```{r}
+kelp_data_clean <- kelp_data %>%
+  filter(!species_code %in% c("NO_KELP", "STUMP"))
+
+kelp_richness <- kelp_data_clean %>%
+  group_by(ARKEV_type, Date) %>%
+  summarise(
+    richness = n_distinct(species_code[!is.na(count) & count > 0]),
+    .groups = "drop"
+  )
+
+kelp_abundance <- kelp_data_clean %>%
+  group_by(ARKEV_type, Date) %>%
+  summarise(
+    mean_abundance = mean(count, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+#kelp richness
+```{r}
+# Check normality
+shapiro.test(kelp_richness$richness[kelp_richness$ARKEV_type == "ARKEV"])
+shapiro.test(kelp_richness$richness[kelp_richness$ARKEV_type == "ARKEV_control"])
+
+# Compare richness
+t.test(richness ~ ARKEV_type, data = kelp_richness, var.equal = TRUE)
+# or, if non-normal:
+wilcox.test(richness ~ ARKEV_type, data = kelp_richness)
+```
+
+#kelp abundance
+```{r}
+# Check normality
+shapiro.test(kelp_abundance$mean_abundance[kelp_abundance$ARKEV_type == "ARKEV"])
+shapiro.test(kelp_abundance$mean_abundance[kelp_abundance$ARKEV_type == "ARKEV_control"])
+
+# Compare abundance
+t.test(mean_abundance ~ ARKEV_type, data = kelp_abundance, var.equal = TRUE)
+# or nonparametric:
+wilcox.test(mean_abundance ~ ARKEV_type, data = kelp_abundance)
+```
+
+#nereo recruits
+```{r}
+nereo <- kelp_data %>%
+  filter(species_code %in% c("NERJ", "NERA", "LAMR"))
+
+str(nereo)
+
+nereo_summary <- nereo %>%
+  group_by(Date, ARKEV_type, species_code) %>%
+  summarise(
+    mean_count = mean(count, na.rm = TRUE),
+    se_count = sd(count, na.rm = TRUE) / sqrt(sum(!is.na(count))),
+    .groups = "drop"
+  )
+```
+
+```{r}
+nereo_aov <- aov(mean_count ~ ARKEV_type * species_code, data = nereo_summary)
+summary(nereo_aov)
+```
+
+```{r}
+TukeyHSD(nereo_aov)
+```
+
+```{r}
+# NERJ
+t.test(count ~ ARKEV_type, data = kelp_data_clean %>% filter(species_code == "NERJ"))
+
+# NERA
+t.test(count ~ ARKEV_type, data = kelp_data_clean %>% filter(species_code == "NERA"))
+
+# LAMR
+t.test(count ~ ARKEV_type, data = kelp_data_clean %>% filter(species_code == "LAMR"))
+```
+
+```{r}
+library(ggplot2)
+kelp_means <- nereo %>%
+  filter(species_code %in% c("NERA", "NERJ", "LAMR")) %>%
+  group_by(ARKEV_type, species_code) %>%
+  summarise(
+    mean_count = mean(count, na.rm = TRUE),
+    se_count = sd(count, na.rm = TRUE) / sqrt(sum(!is.na(count))),
+    .groups = "drop"
+  )
+
+ggplot(kelp_means, aes(x = ARKEV_type, y = mean_count, fill = species_code)) +
+  geom_col(position = position_dodge(width = 0.9), color = "black") +
+  geom_errorbar(
+    aes(ymin = mean_count - se_count, ymax = mean_count + se_count),
+    position = position_dodge(width = 0.9),
+    width = 0.3
+  ) +
+  labs(
+    title = "Bull Kelp Abundance Across ARKEV Types",
+    x = "ARKEV Type",
+    y = "Mean Kelp Count (per m²)",
+    fill = "Species"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+ggplot(nereo_summary, aes(x = Date, y = mean_count, color = species_code, linetype = ARKEV_type)) +
+  geom_point(position = position_dodge(width = 0.8), size = 2) +
+  geom_line(size=1)+
+  geom_errorbar(
+    aes(ymin = mean_count - se_count, ymax = mean_count + se_count),
+    position = position_dodge(width = 0.8),
+    width = 0.3, size=1
+  ) +
+  labs(
+    title = "Kelp Counts by ARKEV Presence",
+    x = "Date",
+    y = "Mean Kelp Count (per m^2)",
+    fill = "Site Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold", hjust = 0.5, vjust=1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size=12, face= "bold"),
+    legend.text = element_text(size=12, face= "bold"))
+```
+
+
+#blade number and reproductivity
+```{r}
+#big river
+br_kelp <- read_csv("BR kelp on ARKEV.csv") %>%
+    mutate(site = "Big River") %>%
+  filter(!is.na(kelp_on_ARKEV)) %>%
+  mutate(stipe_length = as.numeric(stipe_length),
+         reproductive_blade_number = as.numeric(reproductive_blade_number))
+str(br_kelp)
+
+br_clean <- br_kelp %>%
+  mutate(date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d"))%>%
+  distinct(site, date, ARKEV_unit, .keep_all = TRUE) %>%
+  group_by(site, date) %>%
+  mutate(total = sum(kelp_on_ARKEV))
+str(br_clean)
+```
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+br_monthly_indiv <- br_clean %>%
+  mutate(month = month(date, label = TRUE, abbr = TRUE)) %>%
+  filter(!is.na(blade_number) & !is.na(reproductive_blade_number))%>%
+  group_by(site, month, ARKEV_unit) %>%
+  summarise(
+    mean_blade_number = mean(blade_number, na.rm = TRUE),
+    mean_repro_blades = mean(reproductive_blade_number, na.rm = TRUE),
+    percent_fertile = ifelse(mean_blade_number > 0,
+                             (mean_repro_blades / mean_blade_number) * 100, NA),
+    .groups = "drop"
+  ) %>%
+  mutate(mean_spores_hr1 = 456111.1,
+         se_spores_hr1 = 143536.1,
+         mean_spores_hr2 = 450277.8,
+         se_spores_hr2 = 108371.3,
+         reproductive_output = mean_repro_blades * (mean_spores_hr1/3))
+
+```
+
+```{r}
+br_monthly_total <- br_clean %>%
+  mutate(month = month(date, label = TRUE, abbr = TRUE)) %>%
+  filter(!is.na(blade_number) & !is.na(reproductive_blade_number))%>%
+group_by(month) %>%
+  summarise(
+       total = mean(total),
+       mean_blade_number = mean(blade_number, na.rm = TRUE),
+       mean_repro_blades = mean(reproductive_blade_number, na.rm = TRUE),
+       percent_fertile = ifelse(mean_blade_number > 0,
+                             (mean_repro_blades / mean_blade_number) * 100, NA),
+       total_repro_blades = mean_repro_blades * total,
+       estimated_sori_released_4day = mean(reproductive_blade_number, na.rm = TRUE) * 7.5,
+       estimated_sori_released_6day = mean(reproductive_blade_number, na.rm = TRUE) * 5,
+    .groups = "drop"
+  )%>%
+  mutate(mean_spores_hr1 = 456111.1,
+         se_spores_hr1 = 143536.1,
+         mean_spores_hr2 = 450277.8,
+         se_spores_hr2 = 108371.3,
+         reproductive_output_4day = estimated_sori_released_4day * (mean_spores_hr1/3),
+         reproductive_output_6day = estimated_sori_released_6day * (mean_spores_hr1/3))
+
+# Transpose the data frame
+br_mt_transposed <- as.data.frame(t(br_monthly_total))
+
+write.csv(br_mt_transposed, "C:/Users/bmbug/OneDrive/Documents/MLML recovered/Bull Kelp Project/data/2025/br_mt_transposed.csv", 
+          row.names = TRUE)
+
+```
+
+```{r}
+br_repro_total <- br_monthly_total %>%
+  summarise(
+    mean_blade_number = mean(mean_blade_number, na.rm = TRUE),
+    mean_repro_blades = mean(mean_repro_blades, na.rm = TRUE),
+    percent_fertile = mean(percent_fertile),
+    total_repro_blades = mean(total_repro_blades),
+    mean_sori_4day = mean(estimated_sori_released_4day, na.rm = TRUE),
+    se_sori_4day = sd(estimated_sori_released_4day, na.rm = TRUE) / sqrt(n()),
+    mean_sori_6day = mean(estimated_sori_released_6day, na.rm = TRUE),
+    se_sori_6day = sd(estimated_sori_released_6day, na.rm = TRUE) / sqrt(n()),
+    mean_spores_4day = mean(reproductive_output_4day, na.rm = TRUE),
+    se_spores_4day = sd(reproductive_output_4day, na.rm = TRUE) / sqrt(n()),
+    mean_spores_6day = mean(reproductive_output_6day, na.rm = TRUE),
+    se_spores_6day = sd(reproductive_output_6day, na.rm = TRUE) / sqrt(n())
+  )
+
+# Transpose the data frame
+br_repro_transposed <- as.data.frame(t(br_repro_total))
+
+write.csv(br_repro_transposed, "C:/Users/bmbug/OneDrive/Documents/MLML recovered/Bull Kelp Project/data/2025/br_repro_transposed.csv", 
+          row.names = TRUE)
+```
+
+```{r}
+br_estimate <- br_monthly_total %>%
+  summarise(
+    mean_sori_4day_total = mean(estimated_sori_released_4day, na.rm = TRUE) * 22.75,
+    se_sori_4day_total = sd(estimated_sori_released_4day, na.rm = TRUE) / sqrt(n()) * 22.75,
+    
+    mean_sori_6day_total = mean(estimated_sori_released_6day, na.rm = TRUE) * 15,
+    se_sori_6day_total = sd(estimated_sori_released_6day, na.rm = TRUE) / sqrt(n()) * 15,
+    
+    mean_spores_4day_total = mean(reproductive_output_4day, na.rm = TRUE) * 22.75,
+    se_spores_4day_total = sd(reproductive_output_4day, na.rm = TRUE) / sqrt(n()) * 22.75,
+    
+    mean_spores_6day_total = mean(reproductive_output_6day, na.rm = TRUE) * 15,
+    se_spores_6day_total = sd(reproductive_output_6day, na.rm = TRUE) / sqrt(n()) * 15
+  )
+
+br_estimate_transposed <- as.data.frame(t(br_estimate))
+
+write.csv(br_estimate_transposed, "C:/Users/bmbug/OneDrive/Documents/MLML recovered/Bull Kelp Project/data/2025/br_estimate_transposed.csv", 
+          row.names = TRUE)
+
+```
+
+
+#Kelp biomass data
+```{r}
+biomass = read.csv("ARKEV harvest.csv", header =TRUE)
+biomass <- biomass %>%
+  mutate(
+    Stipe_length = as.numeric(Stipe_length),
+    Weight = as.numeric(Weight),
+    Total.Blades = as.numeric(Total.Blades),
+    Reproductive_blades = as.numeric(Reproductive_blades)
+  )
+str(biomass)
+```
+
+```{r}
+library(dplyr)
+
+# Filter for Noyo site
+noyo_data <- biomass %>%
+  filter(Site == "Noyo")
+
+# Summarize total biomass and mean ± SE
+noyo_biomass <- noyo_data %>%
+  summarise(
+    total_biomass = sum(Weight, na.rm = TRUE),          # total biomass (g)
+    mean_biomass = mean(Weight, na.rm = TRUE),         # mean biomass per individual
+    se_biomass = sd(Weight, na.rm = TRUE) / sqrt(sum(!is.na(Weight)))  # standard error
+  )
+
+noyo_arkev_biomass <- noyo_data %>%
+  group_by(Unit)%>%
+  summarize(
+    total_biomass = sum(Weight, na.rm = TRUE),
+    mean_biomass = mean(Weight, na.rm = TRUE),        
+    se_biomass = sd(Weight, na.rm = TRUE) / sqrt(sum(!is.na(Weight)))  
+  )
+
+noyo_per_unit_summary <- noyo_arkev_biomass %>%
+  summarise(
+    mean_unit_biomass = mean(total_biomass, na.rm = TRUE),
+    se_unit_biomass = sd(total_biomass, na.rm = TRUE) / sqrt(sum(!is.na(total_biomass)))
+  )
+
+```
+
+```{r}
+# Filter Big River data
+br_biomass <- biomass %>%
+  filter(Site == "Big River")
+
+#Per ARKEV unit biomass
+br_per_unit <- br_biomass %>%
+  group_by(Unit) %>%
+  summarise(
+    unit_biomass = sum(Weight, na.rm = TRUE)
+  )
+
+br_per_unit_summary <- br_per_unit %>%
+  summarise(
+    mean_unit_biomass = mean(unit_biomass, na.rm = TRUE),
+    se_unit_biomass = sd(unit_biomass, na.rm = TRUE) / sqrt(sum(!is.na(unit_biomass)))
+  )
+
+
+#Per individual kelp biomass
+br_per_kelp_summary <- br_biomass %>%
+  summarise(
+    mean_kelp_biomass = mean(Weight, na.rm = TRUE),
+    se_kelp_biomass = sd(Weight, na.rm = TRUE) / sqrt(sum(!is.na(Weight)))
+  )
+
+br_total_df <- br_clean %>%
+  distinct(date, .keep_all = TRUE) %>%
+  select(date, total)
+
+str(br_total_df)
+
+#Estimate total biomass for Big River using mean per kelp * total kelp count
+br_final_biomass <- br_per_kelp_summary$mean_kelp_biomass * 179
+br_arkev_final <- br_per_unit_summary$mean_unit_biomass * 44
+
+
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Add a Site column to each summary
+noyo_plot_data <- noyo_per_unit_summary %>%
+  mutate(Site = "Noyo")
+
+br_plot_data <- br_per_unit_summary %>%
+  mutate(Site = "Big River")
+
+# Combine both
+combined_plot_data <- bind_rows(noyo_plot_data, br_plot_data)
+
+# Make bar plot with SE
+ggplot(combined_plot_data, aes(x = Site, y = mean_unit_biomass, fill = Site)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  geom_errorbar(aes(ymin = mean_unit_biomass - se_unit_biomass,
+                    ymax = mean_unit_biomass + se_unit_biomass),
+                width = 0.2) +
+  labs(y = "Mean ARKEV Unit Biomass (kg)", x = "",
+       title = "ARKEV Kelp Biomass by Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold", hjust = 0.5, vjust=1),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "none")
+```
