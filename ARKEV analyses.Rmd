@@ -18,7 +18,8 @@ MASTER <- MASTER %>%
     depth_ft = as.numeric(depth_ft),
     size_cm = as.numeric(size_cm)
   )
-str(MASTER)
+str(MASTER) 
+
 ```
 
 ```{r}
