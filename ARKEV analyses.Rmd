@@ -4,27 +4,30 @@ output: pdf_document
 date: "2025-10-24"
 ---
 ```{r}
-install.packages('googlesheets4')
-library(googlesheets4)
-MASTER = read_sheet('https://docs.google.com/spreadsheets/d/1jhqeuVwg7_icGaYOh5YpMcoPubQsDs3fn9fWGcZmFi4/edit?gid=1766421584#gid=1766421584')
+#installing packages
 library(dplyr)
 library(tidyr)
 library(lubridate)
-MASTER <- MASTER %>%
-  mutate(count = as.numeric(MASTER$count))%>%
-  mutate(percent = as.numeric(MASTER$percent))%>%
+library(googlesheets4)
+
+#importing datasheet 
+MASTER = read_sheet('https://docs.google.com/spreadsheets/d/1jhqeuVwg7_icGaYOh5YpMcoPubQsDs3fn9fWGcZmFi4/edit?gid=1766421584#gid=1766421584')
+
+doc_MASTER <- MASTER %>%
+  mutate(across(where(is.character), ~ na_if(.x, "NA"))) %>%
+  mutate(count = as.numeric(count), 
+         percent = as.numeric(percent))%>%
   mutate(Date = make_date(year, month, day)) %>%
   mutate(
     depth_ft = as.numeric(depth_ft),
     size_cm = as.numeric(size_cm)
   )
-str(MASTER) 
 
 ```
 
 ```{r}
 
-kelp_data_full <- MASTER%>%
+kelp_data_full <- doc_MASTER %>%
   filter(data_type == "kelp")%>%
   # Fill in missing combos of ARKEV_type × Date × species_code
   complete(month, day, year, ARKEV_type, ARKEV_unit, data_type, Date, species_code, fill = list(count = 0))
