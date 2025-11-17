@@ -23,6 +23,7 @@ doc_MASTER <- MASTER %>%
     size_cm = as.numeric(size_cm)
   )
 
+View(doc_MASTER)
 ```
 
 ```{r}
@@ -42,7 +43,7 @@ kelp_summary_full <- kelp_data_full %>%
     .groups = "drop"
   )
 
-kelp_data <-  MASTER%>%
+kelp_data <- doc_MASTER %>%
   filter(data_type == "kelp")%>%
   filter(month != 10) %>%
   # Fill in missing combos of ARKEV_type × Date × species_code
@@ -55,6 +56,7 @@ kelp_summary <- kelp_data %>%
     se_count = sd(count, na.rm = TRUE) / sqrt(sum(!is.na(count))),
     .groups = "drop"
   )
+View(kelp_data_full)
 ```
 
 ```{r}
@@ -84,7 +86,7 @@ ggplot(kelp_summary_full, aes(x = Date, y = mean_count, color = ARKEV_type, grou
     legend.title = element_text(size=12, face= "bold"),
     legend.text = element_text(size=12, face= "bold"))
 
-
+#Removing October Month 
 ggplot(kelp_summary, aes(x = Date, y = mean_count, color = ARKEV_type, group = ARKEV_type)) +
   geom_point(position = position_dodge(width = 0.8), size = 2) +
   geom_line(size=1)+
@@ -412,20 +414,47 @@ ggplot(nereo_summary, aes(x = Date, y = mean_count, color = species_code, linety
 
 #blade number and reproductivity
 ```{r}
+
+library(purrr)
 #big river
-br_kelp <- read_csv("BR kelp on ARKEV.csv") %>%
-    mutate(site = "Big River") %>%
-  filter(!is.na(kelp_on_ARKEV)) %>%
-  mutate(stipe_length = as.numeric(stipe_length),
-         reproductive_blade_number = as.numeric(reproductive_blade_number))
-str(br_kelp)
+br_kelp_MASTER = read_sheet('https://docs.google.com/spreadsheets/d/1mLYdDFh0XjEMPe9db5vKZzQMHRzRLlC-7fostoIXkM0/edit?gid=0#gid=0')
+
+glimpse(br_kelp_MASTER)
+
+# Helper function: safely convert list elements to numeric
+to_numeric <- function(x) {
+  map_dbl(x, ~ {
+    # empty list → NA
+    if (length(.x) == 0) return(NA_real_)
+    
+    # if it's character, convert "NA" → NA first
+    if (is.character(.x)) {
+      .x <- na_if(.x, "NA")
+    }
+    as.numeric(.x)
+  })
+}
+
+br_kelp <- br_kelp_MASTER %>%
+  mutate(
+    site = "Big River",
+    kelp_on_ARKEV = to_numeric(kelp_on_ARKEV),
+    stipe_length = to_numeric(stipe_length),
+    reproductive_kelp_on_ARKEV = to_numeric(reproductive_kelp_on_ARKEV),
+    blade_number = to_numeric(blade_number),
+    reproductive_blade_number = to_numeric(reproductive_blade_number)
+  ) %>%
+  filter(!is.na(kelp_on_ARKEV))
+
+(br_kelp)
 
 br_clean <- br_kelp %>%
   mutate(date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d"))%>%
   distinct(site, date, ARKEV_unit, .keep_all = TRUE) %>%
   group_by(site, date) %>%
-  mutate(total = sum(kelp_on_ARKEV))
-str(br_clean)
+  mutate(total = sum(kelp_on_ARKEV)) %>%
+  select (-c(observer:...17))
+print(br_clean)
 ```
 
 ```{r}
@@ -613,7 +642,6 @@ br_arkev_final <- br_per_unit_summary$mean_unit_biomass * 44
 
 ```
 
-
 ```{r}
 library(dplyr)
 library(ggplot2)
@@ -645,3 +673,9 @@ ggplot(combined_plot_data, aes(x = Site, y = mean_unit_biomass, fill = Site)) +
     title = element_text(size = 15, face = "bold"),
     legend.position = "none")
 ```
+
+#Benthic community data (BR)
+```{r}
+
+```
+
