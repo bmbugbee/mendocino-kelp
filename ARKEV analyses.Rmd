@@ -975,6 +975,23 @@ View(benthic_data_cleaned)
 
 #community matrix
 ```{r}
+library(vegan)
+benthic_comm <- benthic_data_cleaned %>%
+  # 1. (optional but common) aggregate within samples × species
+  group_by(Date, month, ARKEV_type, ARKEV_unit, species_code) %>%
+  summarise(density = sum(density, na.rm = TRUE), .groups = "drop") %>%
+  
+  # 2. pivot to wide community matrix
+  pivot_wider(
+    names_from  = species_code,
+    values_from = density,
+    values_fill = 0
+  )
+
+benthic_comm_species <- benthic_comm %>%
+  dplyr::select(-Date, -month, -ARKEV_type, -ARKEV_unit)
+
+
 comm_cols <- c(
   "STRPUR_>2cm", "LAMR", "TEGULA",
   "MESFRA", "ALAR", "ANEMONE", "CANSPP",
@@ -984,7 +1001,12 @@ comm_cols <- c(
   "NERJ", "PATMIN", "PISBRE", "PISGIG", "PISOCH", "STRPUR_<2cm", "STUMP"
 )
 
-comm_matrix <- benthic_data_cleaned[, comm_cols]
+comm_matrix <- benthic_comm[,comm_cols]
+
+# hellinger transformation to account for many zeros
+comm_hellinger <- decostand(comm_matrix, method = "hellinger")
+
+nmds_model <- metaMDS(comm_hellinger, distance = "bray", k = 2, trymax = 100)
 
 ```
 
