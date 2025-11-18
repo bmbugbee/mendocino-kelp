@@ -9,21 +9,54 @@ library(dplyr)
 library(tidyr)
 library(lubridate)
 library(googlesheets4)
+library(purrr)
 
 #importing datasheet 
 MASTER = read_sheet('https://docs.google.com/spreadsheets/d/1jhqeuVwg7_icGaYOh5YpMcoPubQsDs3fn9fWGcZmFi4/edit?gid=1766421584#gid=1766421584')
 
-doc_MASTER <- MASTER %>%
-  mutate(across(where(is.character), ~ na_if(.x, "NA"))) %>%
-  mutate(count = as.numeric(count), 
-         percent = as.numeric(percent))%>%
-  mutate(Date = make_date(year, month, day)) %>%
-  mutate(
-    depth_ft = as.numeric(depth_ft),
-    size_cm = as.numeric(size_cm)
-  )
+#creating the function that converts "NAs" to true NAs
+to_numeric <- function(x) {
+  map_dbl(x, ~ {
+    # empty list → NA
+    if (length(.x) == 0) return(NA_real_)
+    
+    # if it's character, convert "NA" → NA first
+    if (is.character(.x)) {
+      .x <- na_if(.x, "NA")
+    }
+    as.numeric(.x)
+  })
+}
 
-View(doc_MASTER)
+doc_MASTER <- MASTER %>%
+# turn "NA" strings in character columns into real NA
+  mutate(across(where(is.character), ~ na_if(.x, "NA"))) %>%
+# list-columns that are truly numeric-ish
+  mutate(
+    count   = to_numeric(count),
+    percent = to_numeric(percent),
+    depth_ft = to_numeric(depth_ft),
+    temp_f   = to_numeric(temp_f)
+  ) %>%
+# handle size_cm specially
+  mutate(
+# keep the original category (<2cm, >2cm, numbers) as a character column "urchin_size_class"
+    urch_size_class = map_chr(size_cm, ~ {
+      if (length(.x) == 0) return(NA_character_)
+      as.character(.x)
+    }),
+# numeric version: fish lengths only; urchin categories → NA
+    size_cm = map_dbl(size_cm, ~ {
+      if (length(.x) == 0) return(NA_real_)
+      if (is.character(.x)) {
+# drop urchin categories from numeric column
+        if (.x %in% c("<2cm", ">2cm")) return(NA_real_)
+        .x <- na_if(.x, "NA")
+      }
+      as.numeric(.x)
+    })
+  ) %>%
+  mutate(Date = make_date(year, month, day))
 ```
 
 ```{r}
@@ -674,8 +707,284 @@ ggplot(combined_plot_data, aes(x = Site, y = mean_unit_biomass, fill = Site)) +
     legend.position = "none")
 ```
 
+#Urchin size class data
+```{r}
+urch_data <- doc_MASTER %>%
+  filter(data_type == "urchins") %>%
+  dplyr::select(c(Date, month, ARKEV_type, ARKEV_unit, data_type, species_code, count, urch_size_class, substrate, depth_ft, temp_f, visibility_m)) %>%
+  mutate(density = count/pi) 
+
+#just purps
+purps_data <- urch_data %>%
+  filter(species_code == "STRPUR") %>% # only purps
+filter(!(month == 10 & ARKEV_type == "ARKEV" & urch_size_class == "NA"), 
+       !(month == 8 & ARKEV_type == "ARKEV" & count == "NA"))
+
+purps_summary <- purps_data %>%
+ group_by(month, ARKEV_type, urch_size_class) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd_density = sd(density, na.rm = TRUE))
+View(purps_data)
+```
+
+##ARKEV vs. Control over time 
+```{r}
+purps_summary <- purps_summary %>%
+  mutate(month = factor(month, levels = 4:10, labels = c("Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct")))
+
+
+
+ggplot(
+  purps_summary,
+  aes(
+    x = month,
+    y = mean_density,
+    color = urch_size_class,
+    linetype = ARKEV_type,
+    group = interaction(ARKEV_type, urch_size_class)
+  )
+) +
+  geom_line(linewidth = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_density - sd_density,
+        ymax = mean_density + sd_density),
+    width = 0.1,      # small horizontal width for visual clarity
+    size = 0.8) +
+  scale_linetype_manual(values = c("ARKEV" = "solid", "ARKEV_control" = "dashed")) +
+  scale_color_manual(values = c("<2cm" = "#1b9e77", ">2cm" = "#d95f02")) +
+  labs(
+    x = "Month",
+    y = "Purple urchin density (indv/m²)",
+    color = "Size class",
+    linetype = "Treatment"
+  ) +
+  theme_classic(base_size = 16) +
+  theme(
+    legend.position = "right",
+    axis.text = element_text(color = "black"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(size = 12),
+    axis.line = element_line(size = 0.4),
+    panel.grid = element_blank()
+  )
+
+```
+
+#stats (LLM)
+```{r}
+
+
+#checking distrubution of density data
+ggplot(purps_data, aes(x = density)) +
+  geom_histogram(aes(y = ..density..), bins = 30, alpha = 0.5) +
+  geom_density(color = "red", linewidth = 1) +
+  labs(title = "Distribution of Urchin Density",
+       x = "Urchin density (indv/m²)",
+       y = "Density") +
+  theme_classic()
+
+ggplot(purps_data, aes(sample = density)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Q-Q Plot: Urchin Density") +
+  theme_classic()
+
+shapiro.test(purps_data$density) #NOT NORMALLY DISTRIBUTED
+
+#log transformation
+purps_data_log <- purps_data %>%
+  mutate(log_density = log(density + 1))
+
+shapiro.test(purps_data_log$log_density)
+ggplot(purps_data_log, aes(sample = log_density)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Q-Q Plot: Urchin Density") +
+  theme_classic()
+
+
+library(lme4)
+library(lmerTest)
+
+purps_data_log <- purps_data_log %>%
+  mutate(month_f = factor(month))
+
+#Model
+full_mod <- lmer(
+  log_density ~ month_f * ARKEV_type * urch_size_class + (1 | ARKEV_unit),
+  data = purps_data_log
+)
+
+summary(full_mod)
+  #
+anova(full_mod)
+
+library(emmeans)
+
+# Get model predictions
+
+emm_effects <- emmeans(full_mod,~ ARKEV_type | month_f * urch_size_class)
+
+# ARKEV vs control difference at each month × size class:
+treat_diff <- contrast(emm_effects, method = "revpairwise")  # control - ARKEV or vice versa
+treat_diff
+
+```
+##ARKEV vs. Control 
+```{r}
+purp_by_type <- purps_data %>%
+  group_by(ARKEV_type, urch_size_class) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd_density = sd(density, na.rm = TRUE))
+
+ggplot(
+  purp_by_type,
+  aes(x = ARKEV_type, y = mean_density, fill = urch_size_class)) +
+  geom_col(position = position_dodge(0.9), width = 0.7, color = "black") +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd_density,
+      ymax = mean_density + sd_density
+    ),
+    position = position_dodge(0.9),
+    width = 0.2
+  ) +
+  scale_fill_manual(values = c("<2cm" = "#1b9e77", ">2cm" = "#d95f02")) +
+  labs(
+    x = "Treatment",
+    y = "Purple urchin density (indv/m²)",
+    fill = "Size class"
+  ) +
+  theme_classic(base_size = 16) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+```
+#stats(AOV)
+```{r}
+aov_purp_density <- aov(
+  log_density ~ ARKEV_type * urch_size_class,
+  data = purps_data_log
+)
+summary(aov_purp_density)
+
+TukeyHSD(aov_purp_density)
+
+#significant interactions
+##ARKEV: >2cm - ARKEV: <2cm
+##ARKEV_control: >2cm - ARKEV: <2cm
+##ARKEV: >2cm - ARKEV_control: <2cm 
+##ARKEV_control: >2cm - ARKEV_control: <2cm
+
+```
+#ARKEV vs. Control vs. ARKEV w/ drift
+```{r}
+#creating a df with three treatment types 
+treatments <- purps_data %>%
+  mutate(
+    ARKEV_type = case_when(
+      ARKEV_unit %in% c("2A", "2C", "2E", 
+                        "3A", "3C", "3E",
+                        "5A", "5C", "5E",
+                        "6A", "6C", "6E",
+                        "7A", "7C", "7E") ~ "ARKEV_drift",
+      TRUE ~ ARKEV_type)) # keep existing values for all other units
+
+treatment_density <- treatments %>%
+  group_by(ARKEV_type, urch_size_class) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd_density = sd(density, na.rm = TRUE))
+
+ggplot(treatment_density, aes(x = ARKEV_type, y = mean_density, fill = urch_size_class)) +
+  geom_col(position = position_dodge(0.9), width = 0.7, color = "black") +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd_density,
+      ymax = mean_density + sd_density
+    ),
+    position = position_dodge(0.9),
+    width = 0.2
+  ) +
+  scale_fill_manual(values = c("<2cm" = "#1b9e77", ">2cm" = "#d95f02")) +
+  labs(
+    x = "Treatment",
+    y = "Purple urchin density (indv/m²)",
+    fill = "Size class"
+  ) +
+  theme_classic(base_size = 16) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+```
+#stats(AOV)
+```{r}
+treatments_data_log <- treatments %>%
+  mutate(log_density = log(density + 1))
+
+aov_treatment_density <- aov(
+  log_density ~ ARKEV_type * urch_size_class,
+  data = treatments_data_log
+)
+summary(aov_treatment_density)
+
+TukeyHSD(aov_treatment_density)
+
+#significant interactions
+## ARKEV_drift:<2cm-ARKEV:<2cm 
+## ARKEV:>2cm-ARKEV:<2cm  
+## ARKEV_control:>2cm-ARKEV_control:<2cm
+## ARKEV_drift:>2cm-ARKEV_drift:<2cm
+## ARKEV_drift:>2cm-ARKEV:>2cm
+## ARKEV_drift:>2cm-ARKEV_control:>2cm 
+
+#There is a significantly greater density of purple urchins of both size classes in the ARKEV with drift plots compared to the ARKEV plots. 
+#Across all treatments, density of <2cm is significantly greater than density of >2cm urchins. #Urchin density was only significantly greater in the >2cm ARKEV with drift plots compared to the control plots. 
+
+```
+
 #Benthic community data (BR)
 ```{r}
+benthic_data <- doc_MASTER %>%
+filter(data_type == c("urchins", "kelp", "inverts", "tegula")) %>%
+  dplyr::select(c(Date, month, ARKEV_type, ARKEV_unit, data_type, species_code, count, urch_size_class, substrate, depth_ft, temp_f, visibility_m)) %>%
+  mutate(density = count/pi) 
+
+benthic_data_cleaned <- benthic_data %>%
+   mutate( species_code = case_when(
+      species_code == "STRPUR" & urch_size_class == "<2cm" ~ "STRPUR_<2cm",
+      species_code == "STRPUR" & urch_size_class == ">2cm" ~ "STRPUR_>2cm",
+      TRUE ~ species_code
+    ) 
+  ) %>%
+  filter(!(month == 10 & ARKEV_type == "ARKEV" & urch_size_class == "NA"), 
+       !(month == 8 & ARKEV_type == "ARKEV" & count == "NA"), 
+       !(month == 7 & ARKEV_type == "ARKEV_control" & ARKEV_unit == "C7A" & count == "NA")) %>%
+  dplyr::select(-c(urch_size_class:visibility_m))
+
+View(benthic_data_cleaned)
+```
+
+#community matrix
+```{r}
+comm_cols <- c(
+  "STRPUR_>2cm", "LAMR", "TEGULA",
+  "MESFRA", "ALAR", "ANEMONE", "CANSPP",
+  "CORCAL", "COSCOS",
+  "DERIMB", "DESSPP", "DICTYOTALES",
+  "HALRUF", "LAMR", "LAMSET", "NERA",
+  "NERJ", "PATMIN", "PISBRE", "PISGIG", "PISOCH", "STRPUR_<2cm", "STUMP"
+)
+
+comm_matrix <- benthic_data_cleaned[, comm_cols]
 
 ```
 
