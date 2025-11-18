@@ -970,43 +970,181 @@ benthic_data_cleaned <- benthic_data %>%
        !(month == 7 & ARKEV_type == "ARKEV_control" & ARKEV_unit == "C7A" & count == "NA")) %>%
   dplyr::select(-c(urch_size_class:visibility_m))
 
-View(benthic_data_cleaned)
+glimpse(benthic_data_cleaned)
 ```
 
-#community matrix
+#community matrix by block
 ```{r}
 library(vegan)
-benthic_comm <- benthic_data_cleaned %>%
-  # 1. (optional but common) aggregate within samples × species
-  group_by(Date, month, ARKEV_type, ARKEV_unit, species_code) %>%
+library(stringr)
+
+benthic_block <- benthic_data_cleaned %>%
+  mutate(  
+    # remove leading "C" if present (e.g. "C10A" -> "10A")
+    clean_unit = str_remove(ARKEV_unit, "^C"),
+    # now extract the block number (everything before first letter)
+    block = str_extract(clean_unit, "^\\d+")
+  )
+
+benthic_comm <- benthic_block %>%
+  group_by(ARKEV_type, block, species_code) %>%
   summarise(density = sum(density, na.rm = TRUE), .groups = "drop") %>%
-  
-  # 2. pivot to wide community matrix
   pivot_wider(
     names_from  = species_code,
     values_from = density,
     values_fill = 0
+  ) %>%
+  dplyr::select(-NO_INVERTS, -NO_KELP)   # fine to drop these “no organism” codes
+
+
+# 1. Build meta and comm from the same benthic_comm
+meta <- benthic_comm %>%
+  dplyr::select(ARKEV_type, block)
+
+comm <- benthic_comm %>%
+  dplyr::select(-ARKEV_type, -block)
+
+
+# 2. Clean comm (replace NAs just in case)
+comm[is.na(comm)] <- 0
+
+
+# 5. Transform for NMDS
+comm_trans <- decostand(comm, method = "total") %>% sqrt()
+
+
+# 6. NMDS
+set.seed(123)
+nmds_res <- metaMDS(comm_trans, distance = "bray", k = 2)
+
+# 7. PERMANOVA (not significant)
+permanova <- adonis2(comm_trans ~ ARKEV_type, data = meta, method = "bray")
+permanova
+
+# 8. Plot NMDS
+site_scores <- as.data.frame(scores(nmds_res, display = "sites")) %>%
+  bind_cols(meta)
+
+
+ggplot() +
+  geom_point(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    size = 3.5, alpha = 0.85
+  ) +
+  stat_ellipse(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    type = "t",
+    linetype = "solid",
+    size = 0.8,
+    alpha = 0.15,
+    show.legend = FALSE
+  ) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Treatment"
+  ) +
+  scale_color_manual(values = c("ARKEV" = "blue", "ARKEV_control" = "red")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = NA),
+    legend.key.size = unit(0.8, "cm"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12)
   )
 
-benthic_comm_species <- benthic_comm %>%
-  dplyr::select(-Date, -month, -ARKEV_type, -ARKEV_unit)
+```
+#community matrix by unit
+```{r}
+library(vegan)
+library(stringr)
+
+benthic_comm_unit <- benthic_data_cleaned %>%
+  group_by(ARKEV_type, ARKEV_unit, species_code) %>%
+  summarise(density = sum(density, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    names_from  = species_code,
+    values_from = density,
+    values_fill = 0
+  ) %>%
+  dplyr::select(-NO_INVERTS, -NO_KELP)   # fine to drop these “no organism” codes
 
 
-comm_cols <- c(
-  "STRPUR_>2cm", "LAMR", "TEGULA",
-  "MESFRA", "ALAR", "ANEMONE", "CANSPP",
-  "CORCAL", "COSCOS",
-  "DERIMB", "DESSPP", "DICTYOTALES",
-  "HALRUF", "LAMR", "LAMSET", "NERA",
-  "NERJ", "PATMIN", "PISBRE", "PISGIG", "PISOCH", "STRPUR_<2cm", "STUMP"
-)
+# 1. Build meta and comm from the same benthic_comm
+meta <- benthic_comm_unit %>%
+  dplyr::select(ARKEV_type, ARKEV_unit)
 
-comm_matrix <- benthic_comm[,comm_cols]
+comm <- benthic_comm_unit %>%
+  dplyr::select(-ARKEV_type, -ARKEV_unit)
 
-# hellinger transformation to account for many zeros
-comm_hellinger <- decostand(comm_matrix, method = "hellinger")
 
-nmds_model <- metaMDS(comm_hellinger, distance = "bray", k = 2, trymax = 100)
+# drop samples with no total abundance
+keep_rows <- rowSums(comm) > 0
+comm <- comm[keep_rows, , drop = FALSE]
+meta <- meta[keep_rows, , drop = FALSE]
+
+# drop species that occur in fewer than 2 samples
+keep_cols <- colSums(comm > 0) >= 1
+comm <- comm[, keep_cols, drop = FALSE]
+
+# 5. Transform for NMDS
+comm_trans <- decostand(comm, method = "total") %>% sqrt()
+
+
+# 6. NMDS
+set.seed(123)
+nmds_res <- metaMDS(comm_trans, distance = "bray", k = 2)
+
+# 7. PERMANOVA (not significant)
+permanova <- adonis2(comm_trans ~ ARKEV_type, data = meta, method = "bray")
+permanova
+
+# 8. Plot NMDS
+site_scores <- as.data.frame(scores(nmds_res, display = "sites")) %>%
+  bind_cols(meta)
+
+
+ggplot() +
+  geom_point(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    size = 3.5, alpha = 0.85
+  ) +
+  stat_ellipse(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    type = "t",
+    linetype = "solid",
+    size = 0.8,
+    alpha = 0.15,
+    show.legend = FALSE
+  ) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Treatment"
+  ) +
+  scale_color_manual(values = c("ARKEV" = "blue", "ARKEV_control" = "red")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = NA),
+    legend.key.size = unit(0.8, "cm"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12)
+  )
 
 ```
+
 
