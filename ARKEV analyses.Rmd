@@ -888,11 +888,11 @@ TukeyHSD(aov_purp_density)
 treatments <- purps_data %>%
   mutate(
     ARKEV_type = case_when(
-      ARKEV_unit %in% c("2A", "2C", "2E", 
-                        "3A", "3C", "3E",
-                        "5A", "5C", "5E",
-                        "6A", "6C", "6E",
-                        "7A", "7C", "7E") ~ "ARKEV_drift",
+      ARKEV_unit %in% c("2A", "2C", "2E", "2D", "2B",
+                        "3A", "3C", "3E", "3B", "3D",
+                        "5A", "5C", "5E", "5B", "5D", 
+                        "6A", "6C", "6E", "6D", "6B",
+                        "7A", "7C", "7E", "7B", "7D") ~ "ARKEV_drift",
       TRUE ~ ARKEV_type)) # keep existing values for all other units
 
 treatment_density <- treatments %>%
@@ -954,9 +954,12 @@ TukeyHSD(aov_treatment_density)
 #Benthic community data (BR)
 ```{r}
 benthic_data <- doc_MASTER %>%
-filter(data_type == c("urchins", "kelp", "inverts", "tegula")) %>%
-  dplyr::select(c(Date, month, ARKEV_type, ARKEV_unit, data_type, species_code, count, urch_size_class, substrate, depth_ft, temp_f, visibility_m)) %>%
-  mutate(density = count/pi) 
+  filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
+  dplyr::select(Date, month, ARKEV_type, ARKEV_unit, data_type,
+                species_code, count, urch_size_class, substrate,
+                depth_ft, temp_f, visibility_m) %>%
+  mutate(density = count / pi)
+
 
 benthic_data_cleaned <- benthic_data %>%
    mutate( species_code = case_when(
@@ -970,10 +973,21 @@ benthic_data_cleaned <- benthic_data %>%
        !(month == 7 & ARKEV_type == "ARKEV_control" & ARKEV_unit == "C7A" & count == "NA")) %>%
   dplyr::select(-c(urch_size_class:visibility_m))
 
-glimpse(benthic_data_cleaned)
 ```
 
-#community matrix by block
+```{r}
+inv_comm <- benthic_data %>%
+  filter(data_type == "inverts") %>%
+  mutate(count = replace_na(count, 0)) %>%   # avoid NA counts
+  pivot_wider(
+    names_from = species_code,
+    values_from = count,
+    values_fill = 0
+  )
+
+```
+
+##community matrix by block
 ```{r}
 library(vegan)
 library(stringr)
@@ -984,10 +998,11 @@ benthic_block <- benthic_data_cleaned %>%
     clean_unit = str_remove(ARKEV_unit, "^C"),
     # now extract the block number (everything before first letter)
     block = str_extract(clean_unit, "^\\d+")
-  )
+  ) %>%
+  filter(!month==10)
 
 benthic_comm <- benthic_block %>%
-  group_by(ARKEV_type, block, species_code) %>%
+  group_by(month, ARKEV_type, block, species_code) %>%
   summarise(density = sum(density, na.rm = TRUE), .groups = "drop") %>%
   pivot_wider(
     names_from  = species_code,
@@ -999,10 +1014,10 @@ benthic_comm <- benthic_block %>%
 
 # 1. Build meta and comm from the same benthic_comm
 meta <- benthic_comm %>%
-  dplyr::select(ARKEV_type, block)
+  dplyr::select(month,ARKEV_type, block)
 
 comm <- benthic_comm %>%
-  dplyr::select(-ARKEV_type, -block)
+  dplyr::select(-ARKEV_type, -block, -month)
 
 
 # 2. Clean comm (replace NAs just in case)
@@ -1018,7 +1033,7 @@ set.seed(123)
 nmds_res <- metaMDS(comm_trans, distance = "bray", k = 2)
 
 # 7. PERMANOVA (not significant)
-permanova <- adonis2(comm_trans ~ ARKEV_type, data = meta, method = "bray")
+permanova <- adonis2(comm_trans ~ ARKEV_type + month, data = meta, method = "bray")
 permanova
 
 # 8. Plot NMDS
@@ -1026,42 +1041,117 @@ site_scores <- as.data.frame(scores(nmds_res, display = "sites")) %>%
   bind_cols(meta)
 
 
-ggplot() +
+ggplot(site_scores, aes(x = NMDS1, y = NMDS2)) +
   geom_point(
-    data = site_scores,
-    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
-    size = 3.5, alpha = 0.85
+    aes(color = factor(month), shape = ARKEV_type),
+    size  = 3.5,
+    alpha = 0.85
   ) +
   stat_ellipse(
-    data = site_scores,
-    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
-    type = "t",
-    linetype = "solid",
-    size = 0.8,
-    alpha = 0.15,
-    show.legend = FALSE
+    aes(color = factor(month), linetype = ARKEV_type),
+    type        = "t",
+    size        = 0.8,
+    alpha       = 0.15,
+    show.legend = TRUE
   ) +
   theme_minimal(base_size = 14) +
   labs(
-    x = "NMDS1",
-    y = "NMDS2",
-    color = "Treatment"
+    x        = "NMDS1",
+    y        = "NMDS2",
+    color    = "Month",
+    shape    = "Treatment",
+    linetype = "Treatment"
   ) +
-  scale_color_manual(values = c("ARKEV" = "blue", "ARKEV_control" = "red")) +
+  scale_color_manual(
+    values = c(
+      "4"  = "red",
+      "5"  = "orange",
+      "6"  = "yellow",
+      "7"  = "green2",
+      "8"  = "blue",
+      "9"  = "purple",
+      "10" = "pink"
+    )
+  ) +
   theme(
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    legend.position = "right",
-    legend.title = element_text(face = "bold"),
-    legend.key = element_rect(fill = NA),
-    legend.key.size = unit(0.8, "cm"),
-    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
-    axis.title = element_text(face = "bold", size = 14),
-    axis.text = element_text(size = 12)
+    legend.position  = "right",
+    legend.title     = element_text(face = "bold"),
+    legend.key       = element_rect(fill = NA),
+    legend.key.size  = unit(0.8, "cm"),
+    plot.title       = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title       = element_text(face = "bold", size = 14),
+    axis.text        = element_text(size = 12)
   )
 
+
 ```
-#community matrix by unit
+###per month
+```{r}
+ggplot(site_scores, aes(x = NMDS1, y = NMDS2)) +
+  geom_point(
+    aes(color = ARKEV_type, shape = ARKEV_type),
+    size  = 3.5,
+    alpha = 0.85
+  ) +
+  stat_ellipse(
+    aes(color = ARKEV_type),
+    type  = "t",
+    size  = 0.8,
+    alpha = 0.15
+  ) +
+  facet_wrap(~ month) +
+  theme_classic(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Treatment",
+    shape = "Treatment"
+  )
+
+
+install.packages("remotes")
+remotes::install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+
+
+library(pairwiseAdonis)
+
+# make sure month is treated as a factor
+meta$month <- as.factor(meta$month)
+
+pairwise_results <- pairwise.adonis2(
+  comm_trans ~ month,
+  data        = meta,
+  sim.method  = "bray",
+  p.adjust.m  = "bonferroni"   # or "holm", "BH", etc.
+)
+
+pairwise_results
+
+library(vegan)
+
+months <- unique(meta$month)
+
+results <- lapply(months, function(m) {
+
+  idx <- meta$month == m
+
+  adonis2(
+    comm_trans[idx, ] ~ ARKEV_type,
+    data = meta[idx, ],
+    method = "bray"
+  )
+})
+
+names(results) <- paste0("Month_", months)
+
+results
+
+```
+
+
+##community matrix by unit
 ```{r}
 library(vegan)
 library(stringr)
@@ -1146,5 +1236,207 @@ ggplot() +
   )
 
 ```
+##community matrix by treatment
+```{r}
+benthic_comm_treat <- benthic_data_cleaned %>%
+  mutate(
+    ARKEV_type = case_when(
+      ARKEV_unit %in% c("2A", "2C", "2E", "2D", "2B",
+                        "3A", "3C", "3E", "3B", "3D",
+                        "5A", "5C", "5E", "5B", "5D", 
+                        "6A", "6C", "6E", "6D", "6B",
+                        "7A", "7C", "7E", "7B", "7D") ~ "ARKEV_drift",
+      
+      TRUE ~ ARKEV_type)) %>%
+  group_by(ARKEV_type, ARKEV_unit, species_code) %>%
+  summarise(density = sum(density, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    names_from  = species_code,
+    values_from = density,
+    values_fill = 0
+  ) %>%
+  dplyr::select(-NO_INVERTS, -NO_KELP) 
 
+meta <- benthic_comm_treat %>%
+  dplyr::select(ARKEV_type, ARKEV_unit)
+
+comm <- benthic_comm_treat %>%
+  dplyr::select(-ARKEV_type, -ARKEV_unit)
+
+
+# drop samples with no total abundance
+keep_rows <- rowSums(comm) > 0
+comm <- comm[keep_rows, , drop = FALSE]
+meta <- meta[keep_rows, , drop = FALSE]
+
+# drop species that occur in fewer than 2 samples
+keep_cols <- colSums(comm > 0) >= 1
+comm <- comm[, keep_cols, drop = FALSE]
+
+# 5. Transform for NMDS
+comm_trans <- decostand(comm, method = "total") %>% sqrt()
+
+
+# 6. NMDS
+set.seed(123)
+nmds_res <- metaMDS(comm_trans, distance = "bray", k = 2)
+
+# 7. PERMANOVA (not significant)
+permanova <- adonis2(comm_trans ~ ARKEV_type, data = meta, method = "bray")
+permanova
+
+# 8. Plot NMDS
+site_scores <- as.data.frame(scores(nmds_res, display = "sites")) %>%
+  bind_cols(meta)
+
+
+ggplot() +
+  geom_point(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    size = 3.5, alpha = 0.85
+  ) +
+  stat_ellipse(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    type = "t",
+    linetype = "solid",
+    size = 0.8,
+    alpha = 0.15,
+    show.legend = FALSE
+  ) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Treatment"
+  ) +
+  scale_color_manual(values = c("ARKEV" = "blue", "ARKEV_control" = "red", "ARKEV_drift" = "green3")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = NA),
+    legend.key.size = unit(0.8, "cm"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12)
+  )
+
+```
+##community matrix by quadrant 
+```{r}
+benthic_comm_quad <- benthic_data_cleaned %>%
+ mutate(ARKEV_type = case_when(
+      ARKEV_unit %in% c("C1D", "C1B", "C1A", "C1C", "C1E", "2A", "2C", "2E", "2D", "2B", "C3D", "C3B", "C3A", "C3C", "C3E", "4E", "4C", "4A", "4D", "4B" ,"C5D", "C5B", "C5A", "C5C", "C5E") ~ "ARKEV_NW",
+      ARKEV_unit %in% c("1A", "1C", "1E", "1B", "1D" , "C2D", "C2B", "C2A", "C2C", "C2E", "3A", "3C", "3E", "3B", "3D", "C4D", "C4B", "C4A", "C4C", "C4E", "5A", "5C", "5E", "5B", "5D") ~ "ARKEV_SW",
+      ARKEV_unit %in% c("6A", "6C", "6E", "6B", "6D" , "C7D", "C7B", "C7A", "C7C", "C7E", "8A", "8C", "8E", "8B", "8D", "C9D", "C9B", "C9A", "C9C", "C9E", "10A", "10C", "10E", "10B", "10D") ~ "ARKEV_NE", 
+      ARKEV_unit %in% c("C6D", "C6B", "C6A", "C6C", "C6E", "7A", "7C", "7E", "7D", "7B", "C8D", "C8B", "C8A", "C8C", "C8E", "9E", "9C", "9A", "9D", "9B" ,"C10D", "C10B", "C10A", "C10C", "C10E") ~ "ARKEV_SE")) %>%
+  group_by(ARKEV_type, ARKEV_unit, species_code) %>%
+  summarise(density = sum(density, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    names_from  = species_code,
+    values_from = density,
+    values_fill = 0
+  ) %>%
+  dplyr::select(-NO_INVERTS, -NO_KELP) 
+
+meta <- benthic_comm_quad %>%
+  dplyr::select(ARKEV_type, ARKEV_unit)
+
+comm <- benthic_comm_quad %>%
+  dplyr::select(-ARKEV_type, -ARKEV_unit)
+
+
+# drop samples with no total abundance
+keep_rows <- rowSums(comm) > 0
+comm <- comm[keep_rows, , drop = FALSE]
+meta <- meta[keep_rows, , drop = FALSE]
+
+# drop species that occur in fewer than 2 samples
+keep_cols <- colSums(comm > 0) >= 1
+comm <- comm[, keep_cols, drop = FALSE]
+
+# 5. Transform for NMDS
+comm_trans <- decostand(comm, method = "total") %>% sqrt()
+
+
+# 6. NMDS
+set.seed(123)
+nmds_res <- metaMDS(comm_trans, distance = "bray", k = 2)
+
+# 7. PERMANOVA (not significant)
+permanova <- adonis2(comm_trans ~ ARKEV_type, data = meta, method = "bray")
+permanova
+
+# 8. Plot NMDS
+site_scores <- as.data.frame(scores(nmds_res, display = "sites")) %>%
+  bind_cols(meta)
+
+
+ggplot() +
+  geom_point(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    size = 3.5, alpha = 0.85
+  ) +
+  stat_ellipse(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    type = "t",
+    linetype = "solid",
+    size = 0.8,
+    alpha = 0.15,
+    show.legend = FALSE
+  ) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Treatment"
+  ) +
+  scale_color_manual(values = c("ARKEV_NW" = "blue", "ARKEV_SW" = "red", "ARKEV_NE" = "green3", "ARKEV_SE" = "purple3")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = NA),
+    legend.key.size = unit(0.8, "cm"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12)
+  )
+```
+##community matrix temporal 
+```{r}
+benthic_comm_month <- benthic_data_cleaned %>% 
+  mutate(
+    ARKEV_type = case_when(
+      ARKEV_unit %in% c("2A", "2C", "2E", "2D", "2B",
+                        "3A", "3C", "3E", "3B", "3D",
+                        "5A", "5C", "5E", "5B", "5D", 
+                        "6A", "6C", "6E", "6D", "6B",
+                        "7A", "7C", "7E", "7B", "7D") ~ "ARKEV_drift",
+      
+      TRUE ~ ARKEV_type)) %>%
+  mutate(
+    DATE = case_when(
+      c("")
+    )
+  )
+```
+
+#Algal cover data 
+```{r}
+cover_data <- doc_MASTER %>%
+  filter(data_type == "algal_cover") %>%
+  dplyr::select(c(Date, month, ARKEV_type, ARKEV_unit, data_type, species_code,percent,
+                  substrate)) %>%
+  filter(!species_code == "NO_DATA")
+
+
+
+```
 
