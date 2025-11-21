@@ -3,6 +3,8 @@ title: "ARKEV analyses"
 output: pdf_document
 date: "2025-10-24"
 ---
+
+#Datasheet
 ```{r}
 #installing packages
 library(dplyr)
@@ -594,13 +596,14 @@ write.csv(br_estimate_transposed, "C:/Users/bmbug/OneDrive/Documents/MLML recove
 
 #Kelp biomass data
 ```{r}
-biomass = read.csv("ARKEV harvest.csv", header =TRUE)
+biomass = read_sheet("https://docs.google.com/spreadsheets/d/1heDRA0QEH3cwIhvrdjvF9p_Fdrphw9TvX3eAplhmBA8/edit?gid=0#gid=0")
+
 biomass <- biomass %>%
   mutate(
     Stipe_length = as.numeric(Stipe_length),
     Weight = as.numeric(Weight),
-    Total.Blades = as.numeric(Total.Blades),
-    Reproductive_blades = as.numeric(Reproductive_blades)
+    Total_blades = as.numeric(Total_Blades),
+    Reproductive_blades = as.numeric(Reproductive_Blades)
   )
 str(biomass)
 ```
@@ -725,7 +728,6 @@ purps_summary <- purps_data %>%
   summarise(
     mean_density = mean(density, na.rm = TRUE),
     sd_density = sd(density, na.rm = TRUE))
-View(purps_data)
 ```
 
 ##ARKEV vs. Control over time 
@@ -751,7 +753,7 @@ ggplot(
         ymax = mean_density + sd_density),
     width = 0.1,      # small horizontal width for visual clarity
     size = 0.8) +
-  scale_linetype_manual(values = c("ARKEV" = "solid", "ARKEV_control" = "dashed")) +
+  scale_linetype_manual(values = c("ARKEV" = "solid", "ARKEV_control" = "dotted")) +
   scale_color_manual(values = c("<2cm" = "#1b9e77", ">2cm" = "#d95f02")) +
   labs(
     x = "Month",
@@ -1180,9 +1182,6 @@ ggplot(site_scores, aes(x = NMDS1, y = NMDS2)) +
     color = "Treatment",
     shape = "Treatment"
   )
-
-```
-```{r}
 
 ```
 
@@ -2143,21 +2142,127 @@ ggplot(site_scores_9, aes(x = NMDS1, y = NMDS2)) +
 ```{r}
 cover_data <- doc_MASTER %>%
   filter(data_type == "algal_cover") %>%
-  dplyr::select(c(Date, month, ARKEV_type, ARKEV_unit, data_type, species_code,percent,
-                  substrate)) 
+  dplyr::select(c(Date, month, ARKEV_type, ARKEV_unit, data_type, species_code,percent)) 
+
+cover_filled <- cover_data %>%
+  group_by(Date, ARKEV_unit) %>%
+  mutate(total_cover = sum(percent, na.rm = TRUE)) %>%
+  ungroup()
+
+#creating new rows with BR to add up total cover to 100%
+br_rows <- cover_filled %>%
+  distinct(month,ARKEV_type, ARKEV_unit, data_type, total_cover) %>%
+  filter(total_cover < 100) %>%
+  mutate(
+    species_code = "BR",
+    percent = 100 - total_cover
+  ) %>%
+  select(month, ARKEV_type, ARKEV_unit, data_type, species_code, percent)
+
+#final fixed df
+cover_final <- bind_rows(cover_filled %>% select(-total_cover), br_rows) %>%
+  arrange(month,ARKEV_unit, species_code)
+
+#averaging % cover across units 
+mean_cover <- cover_final %>%
+  group_by(month, ARKEV_type, species_code) %>%
+  summarise(mean_cover = mean(percent))
 
 
-#Cleaning up matrix (NO KELP/INVERT)
+#organizing
+mean_cover$species_code <- reorder(
+  mean_cover$species_code,
+  -mean_cover$mean_cover,
+  FUN = sum)
 
-cover_data_cleaned <- cover_data %>%
-  filter(data_type %in% c("algal_cover")) %>%
-  mutate(percent   = tidyr::replace_na(percent, 0))
+#plot
+ggplot(mean_cover, aes(x = factor(month),
+                           y = mean_cover,
+                           fill = species_code)) +
+  geom_col(position = "stack") +
+  facet_wrap(~ ARKEV_type) +
+  theme_classic() +
+  labs(
+    title = "Benthic Cover Composition by ARKEV Type and Month",
+    x = "Month",
+    y = "% Cover",
+    fill = "Species")
+
+#relative cover
+relative_cover <- mean_cover %>%
+  group_by(month, ARKEV_type) %>%
+mutate(relative_cover = (mean_cover / sum(mean_cover)) * 100
+  ) %>%
+  ungroup()
+
+#ordering
+relative_cover$species_code <- factor(relative_cover$species_code,
+  levels = c("BS", "SCUM", "TURF", "FLESHY", "ER", "ARTCOR", "CRUCOR","BR"))
 
 
-
-
-anyNA(benthic_comm_balance)
-
+#plot
+ggplot(relative_cover, aes(x = factor(month),
+                           y = relative_cover,
+                           fill = species_code)) +
+  geom_col(position = "stack") +
+  facet_wrap(~ ARKEV_type) +
+  theme_classic() +
+  labs(
+    title = "Relative Cover Composition by ARKEV Type and Month",
+    x = "Month",
+    y = "Relative % Cover",
+    fill = "Species"
+  ) +
+  scale_fill_manual(
+    values = c(
+      "BR" = "lightgrey",     # grey for bare rock
+      "BS" = "navajowhite" ,#sand
+      "CRUCOR" = "mediumpurple2", # crustose
+      "ER" = "firebrick",     # encrusting
+      "FLESHY" = "red2", # fleshy
+      "SCUM" = "#d95f02",   # pink
+      "ARTCOR" = "#e7298a",  # olive
+      "TURF" = "#1b9e77"
+    )
+  )  
 
 ```
+
+##plot average 
+```{r}
+first_last <- relative_cover %>%
+  filter(month %in% c(4, 9))
+
+
+ggplot(first_last, aes(x = ARKEV_type,
+                       y = relative_cover,
+                       fill = species_code)) +
+  geom_col(position = "stack") +
+  facet_wrap(~ month) +
+  theme_classic() +
+  labs(
+    title = "Relative Algal Cover Composition by ARKEV Type (Months 4 & 9)",
+    x = "ARKEV Type",
+    y = "Relative % Cover",
+    fill = "Species"
+  ) +
+  scale_fill_manual(
+    values = c(
+      "BR" = "lightgrey",     # grey for bare rock
+      "BS" = "navajowhite" ,#sand
+      "CRUCOR" = "mediumpurple2", # crustose
+      "ER" = "firebrick",     # encrusting
+      "FLESHY" = "red2", # fleshy
+      "SCUM" = "#d95f02",   # pink
+      "ARTCOR" = "#e7298a",  # olive
+      "TURF" = "#1b9e77"
+    )
+  )  
+
+```
+
 #
+```{r}
+
+```
+
