@@ -843,7 +843,7 @@ purp_by_type <- purps_data %>%
 
 ggplot(
   purp_by_type,
-  aes(x = ARKEV_type, y = mean_density, fill = urch_size_class)) +
+  aes(x = urch_size_class, y = mean_density, fill = ARKEV_type)) +
   geom_col(position = position_dodge(0.9), width = 0.7, color = "black") +
   geom_errorbar(
     aes(
@@ -867,23 +867,74 @@ ggplot(
     panel.grid = element_blank()
   )
 ```
-#stats(AOV)
+#stats(ART ANOVA)
 ```{r}
-aov_purp_density <- aov(
-  log_density ~ ARKEV_type * urch_size_class,
-  data = purps_data_log
-)
-summary(aov_purp_density)
+#checking distrubution of density data
+ggplot(purps_data, aes(x = density)) +
+  geom_histogram(aes(y = ..density..), bins = 30, alpha = 0.5) +
+  geom_density(color = "red", linewidth = 1) +
+  labs(title = "Distribution of Urchin Density",
+       x = "Urchin density (indv/m²)",
+       y = "Density") +
+  theme_classic()
 
-TukeyHSD(aov_purp_density)
+ggplot(purps_data, aes(sample = density)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Q-Q Plot: Urchin Density") +
+  theme_classic()
 
-#significant interactions
-##ARKEV: >2cm - ARKEV: <2cm
-##ARKEV_control: >2cm - ARKEV: <2cm
-##ARKEV: >2cm - ARKEV_control: <2cm 
-##ARKEV_control: >2cm - ARKEV_control: <2cm
+shapiro.test(purps_data$density) #NOT NORMALLY DISTRIBUTED
+
+#log transformation
+purps_data_log <- purps_data %>%
+  mutate(log_density = log(density + 1))
+
+shapiro.test(purps_data_log$log_density) #STILL NOT NORMALLY DISTRIBUTED
+ggplot(purps_data_log, aes(sample = log_density)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Q-Q Plot: Urchin Density") +
+  theme_classic()
+
+#testing model residuals for normality
+model <- aov(log_density ~ ARKEV_type * urch_size_class, data = purps_data_log)
+shapiro.test(residuals(model))
+qqnorm(residuals(model))
+qqline(residuals(model))
+hist(residuals(model))
+library(car)
+leveneTest(log_density ~ ARKEV_type * urch_size_class, data = purps_data_log) #data does not meet two-way ANOVA assumptions 
+
+#convert to factors
+purps_data$ARKEV_type <- factor(purps_data$ARKEV_type)
+purps_data$urch_size_class <- factor(purps_data$urch_size_class)
+
+
+#using a non-parametric Aligned Rank Transformation ANOVA, on original data no need to log transform
+library(ARTool)
+model_art <- art(density ~ ARKEV_type * urch_size_class, data = purps_data)
+anova(model_art) #urch_size_class p < 2e-16
+
+
+# Main effects
+art.con(model_art, "ARKEV_type")
+art.con(model_art, "urch_size_class")
+
+# Interaction-specific contrasts (if needed)
+art.con(model_art, "ARKEV_type:urch_size_class")
+
+
+ggplot(purps_data, aes(x = urch_size_class, y = density, fill = ARKEV_type)) +
+  geom_boxplot(position = position_dodge()) +
+  theme_classic() +
+  labs(title = "Interaction of ARKEV Type and Urchin Size Class",
+       x = "Urchin size class", y = "Density") +
+  scale_fill_brewer(palette = "Set2")
 
 ```
+
+
 #ARKEV vs. Control vs. ARKEV w/ drift
 ```{r}
 #creating a df with three treatment types 
