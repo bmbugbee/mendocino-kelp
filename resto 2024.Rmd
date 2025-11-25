@@ -1,0 +1,1420 @@
+---
+title: "Resto 2024"
+output: html_document
+date: "2024-10-23"
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr)
+
+BR_ARKEV = read_sheet("https://docs.google.com/spreadsheets/d/13fY0AhXYNt-dCclyPmoUfENJmI65DOS5--1v7E7Yzrg/edit?gid=0#gid=0")
+BR_ARKEV = BR_ARKEV %>%
+  mutate(DATE = as.Date(DATE, format = "%m/%d/%Y"),
+         Date.of.Outplanting = as.Date(Date.of.Outplanting, format = "%m/%d/%Y"))
+BR_ARKEV$MEASUREMENT = as.numeric(BR_ARKEV$MEASUREMENT)
+str(BR_ARKEV)
+class(BR_ARKEV)
+```
+
+
+```{r}
+# Function to calculate standard error
+standard_error <- function(x) {
+  return(sd(x) / sqrt(length(x)))
+}
+
+# Summarize data by UNIT.NUMBER, DATE, and MORPHOMETRIC
+date_BR_ARKEV <- BR_ARKEV %>%
+  group_by(DATE, UNIT.NUMBER, MORPHOMETRIC) %>%
+  summarise(
+    mean_measurement = mean(MEASUREMENT, na.rm = TRUE),
+    se_measurement = standard_error(MEASUREMENT)
+  )
+date_BR_ARKEV
+
+# Summarize data by UNIT.NUMBER, Days, and MORPHOMETRIC
+days_BR_ARKEV <- BR_ARKEV %>%
+  group_by(Days.Since.Outplanting, UNIT.NUMBER, MORPHOMETRIC) %>%
+  summarise(
+    mean_measurement = mean(MEASUREMENT, na.rm = TRUE),
+    se_measurement = standard_error(MEASUREMENT)
+  )
+days_BR_ARKEV
+```
+
+#survivorship
+```{r}
+ARKEV = read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/ARKEV Outplants.csv")
+ARKEV <- ARKEV %>%
+  mutate(Date = as.Date(Date, format = "%m/%d/%Y"),
+         Unit = as.character(Unit)) 
+str(ARKEV)
+```
+
+```{r}
+# Get the starting count for each Site and Outplanting.group at Days.Since.Outplanting = 0
+starting_counts <- ARKEV %>%
+  filter(Days.Since.Outplanting == 0) %>%
+  group_by(Site, Outplanting.group) %>%
+  summarise(Starting.Count = n())
+
+
+# Calculate the number of individuals as a percentage of the starting count
+individuals_percentage <- ARKEV %>%
+  group_by(Site, Outplanting.group, Days.Since.Outplanting) %>%
+  summarise(Count = n()) %>%
+  left_join(starting_counts, by = c("Site", "Outplanting.group")) %>%
+  mutate(Percentage = (Count / Starting.Count) * 100)
+
+# Plot percentage of individuals remaining by Site and Outplanting.group over time
+library(ggplot2)
+library(directlabels)
+
+ggplot(individuals_percentage, aes(x = Days.Since.Outplanting, y = Percentage, color = Outplanting.group, group = interaction(Site, Outplanting.group))) +
+  geom_line(size = 1.5) +
+  geom_point(size=2) +
+  geom_dl(aes(label = Outplanting.group), method = list(dl.trans(x=x+0.2), "last.points", cex = 1))+
+  facet_wrap(~ Site) +  # Separate panels for each site
+  labs(title = "Survivorship among Outplanting Groups by Site",
+       x = "Days Since Outplanting",
+       y = "Percent Survivorship",
+       color = "Outplanting Group") +
+  theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 25, hjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    legend.position = "none"
+    
+  )
+
+
+```
+
+```{r}
+# Calculate starting counts for each site and outplanting group at Days.Since.Outplanting = 0
+starting_counts <- ARKEV %>%
+  filter(Days.Since.Outplanting == 0) %>%
+  group_by(Site, Outplanting.group) %>%
+  summarise(Starting.Count = n())
+
+# Calculate the percentage of individuals remaining and average across groups within each site
+individuals_percentage <- ARKEV %>%
+  group_by(Site, Outplanting.group, Date) %>%
+  summarise(Count = n()) %>%
+  left_join(starting_counts, by = c("Site", "Outplanting.group")) %>%
+  mutate(Percentage = (Count / Starting.Count) * 100) %>%
+  group_by(Site, Date) %>%
+  summarise(
+    mean_percentage = mean(Percentage, na.rm = TRUE),
+    se_percentage = sd(Percentage, na.rm = TRUE) / sqrt(n())
+  )
+
+# Plot combined lines with a single line for each site
+ggplot(individuals_percentage, aes(x = Date, y = mean_percentage, color = Site)) +
+  geom_smooth(method = "loess", se = TRUE, size = 1.5, aes(fill = Site)) +  # Smooth line with confidence interval shading
+  labs(title = "Smooth Percent Survivorship by Site Over Time",
+       x = "Days Since Outplanting",
+       y = "Percent Survivorship",
+       color = "Site",
+       fill = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 25, hjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13)
+  )
+```
+
+```{r}
+library(ggplot2)
+
+# Calculate the raw counts over time for each site and outplanting group
+mean_counts <- ARKEV %>%
+  group_by(Site, Outplanting.group, Date) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(Site, Date) %>%
+  summarise(
+    mean_count = mean(Count, na.rm = TRUE),
+    se_count = sd(Count, na.rm = TRUE) / sqrt(n())
+  )
+
+# Plot smooth raw counts for each site
+ggplot(mean_counts, aes(x = Date, y = mean_count, color = Site)) +
+ geom_line(size = 1.5) +
+  geom_point(size=2) +
+  labs(title = "Spliced Sporophytes by Site Over Time",
+       x = "Days Since Outplanting",
+       y = "Count of Individuals",
+       color = "Site",
+       fill = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13)
+  )
+
+
+```
+
+```{r}
+filtered_ARKEV <- ARKEV %>%
+  filter(!(Unit %in% c("10.1", "10.2")))
+
+# Calculate the raw counts for each site and outplanting group over time using the filtered data
+raw_counts <- filtered_ARKEV %>%
+  group_by(Site, Date) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Plot raw counts over time for each site
+ggplot(raw_counts, aes(x = Date, y = Count, color = Site, group = interaction(Site))) +
+  geom_line(size = 1.5) +
+  geom_point(size = 2) +
+  labs(title = "Number Spliced Sporophytes across ARKEVS",
+       x = "Date",
+       y = "Count of Spliced Individuals",
+       color = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 25, hjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13)
+  )
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Calculate raw counts for each site, using one count per unit per date
+raw_counts <- ARKEV %>%
+  group_by(Site, Date, Unit) %>%
+  summarise(
+    Count = first(Number.of.Individuals),  # Take the first count per unit per date
+    .groups = "drop"
+  ) %>%
+  group_by(Site, Date) %>%
+  summarise(
+    Count = sum(Count, na.rm = TRUE),  # Sum counts per site and date
+    .groups = "drop"
+  )
+
+# Plot raw counts over time for each site
+ggplot(raw_counts, aes(x = Date, y = Count, color = Site, group = Site)) +
+  geom_line(size = 1.5) +
+  geom_point(size = 2) +
+  labs(title = "Number Spliced Sporophytes on ARKEVS",
+       x = "",
+       y = "# Spliced Individuals",
+       color = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13)
+  )
+
+```
+
+
+
+#SURVIVORSHIP AND GROWTH
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Calculate mean and SE stipe length per site and day
+stipe_site_date <- ARKEV %>%
+  group_by(Site, Date) %>%
+  summarise(
+    mean_stipe_length = mean(Stipe.Length, na.rm = TRUE),
+    se_stipe_length = sd(Stipe.Length, na.rm = TRUE) / sqrt(n()),
+    sd_stipe_length = sd(Stipe.Length, na.rm =TRUE),
+    .groups = "drop"
+  )
+
+# Calculate raw counts for each site, using one count per unit per date
+raw_counts <- ARKEV %>%
+  group_by(Site, Date, Unit) %>%
+  summarise(
+    Count = first(Number.of.Individuals),  # Take the first count per unit per date
+    .groups = "drop"
+  ) %>%
+  group_by(Site, Date) %>%
+  summarise(
+    Count = sum(Count, na.rm = TRUE),  # Sum counts per site and date
+    .groups = "drop"
+  )
+
+# Plot raw counts and stipe length with switched y-axes
+ggplot() +
+  # Raw Counts line (left y-axis) with dashed line
+  geom_point(data = raw_counts, aes(x = Date, y = Count, color = Site), size = 1.5) +
+
+  # Stipe Length line (right y-axis)
+  geom_line(data = stipe_site_date, aes(x = Date, y = mean_stipe_length / max(mean_stipe_length) * max(raw_counts$Count), color = Site, group = Site), size = 1.5) +
+  geom_point(data = stipe_site_date, aes(x = Date, y = mean_stipe_length / max(mean_stipe_length) * max(raw_counts$Count), color = Site)) +
+  geom_errorbar(data = stipe_site_date, aes(x = Date, ymin = (mean_stipe_length - se_stipe_length) / max(mean_stipe_length) * max(raw_counts$Count), ymax = (mean_stipe_length + se_stipe_length) / max(mean_stipe_length) * max(raw_counts$Count), color = Site), width = 0.2) +
+
+  # Customize the labels and scales
+  scale_y_continuous(
+    name = "Number of Spliced Individuals",
+    sec.axis = sec_axis(~ . * max(stipe_site_date$mean_stipe_length) / max(raw_counts$Count), name = "Mean Stipe Length (cm)")
+  ) +
+  labs(title = "Growth and Count of Spliced Sporophytes on ARKEVS",
+       x = "Date",
+       color = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+
+# plot stipe length w SE
+ggplot() +
+  geom_line(data = stipe_site_date, aes(x = Date, y = mean_stipe_length / max(mean_stipe_length) * max(raw_counts$Count), color = Site, group = Site), size = 1.5) +
+  geom_point(data = stipe_site_date, aes(x = Date, y = mean_stipe_length / max(mean_stipe_length) * max(raw_counts$Count), color = Site)) +
+  geom_errorbar(data = stipe_site_date, aes(x = Date, ymin = (mean_stipe_length - se_stipe_length) / max(mean_stipe_length) * max(raw_counts$Count), ymax = (mean_stipe_length + se_stipe_length) / max(mean_stipe_length) * max(raw_counts$Count), color = Site), width = 0.2) +
+
+  labs(title = "Growth of Spliced Sporophytes on ARKEVs",
+       x = "Date",
+       y = "Mean Stipe Length (cm)",
+       color = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+
+# plot stipe length w SD
+ggplot() +
+  geom_line(data = stipe_site_date, aes(x = Date, y = mean_stipe_length / max(mean_stipe_length) * max(raw_counts$Count), color = Site, group = Site), size = 1.5) +
+  geom_point(data = stipe_site_date, aes(x = Date, y = mean_stipe_length / max(mean_stipe_length) * max(raw_counts$Count), color = Site)) +
+  geom_errorbar(data = stipe_site_date, aes(x = Date, ymin = (mean_stipe_length - sd_stipe_length) / max(mean_stipe_length) * max(raw_counts$Count), ymax = (mean_stipe_length + sd_stipe_length) / max(mean_stipe_length) * max(raw_counts$Count), color = Site), width = 0.2) +
+
+  labs(title = "Growth of Spliced Sporophytes on ARKEVs",
+       x = "Date",
+       y = "Mean Stipe Length (cm)",
+       color = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+
+
+#All ARKEV outplants
+```{r}
+ARKEV = read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/ARKEV Outplants.csv")
+ARKEV <- ARKEV %>%
+  mutate(Date = as.Date(Date, format = "%m/%d/%Y"),
+         Unit = as.character(Unit)) 
+str(ARKEV)
+```
+
+```{R}
+stipe_days <- ARKEV %>%
+  group_by(Days.Since.Outplanting, Outplanting.group, Site) %>%
+   summarise(mean_stipe_length = mean(Stipe.Length, na.rm = TRUE),
+            se_stipe_length = sd(Stipe.Length, na.rm = TRUE) / sqrt(n()))
+
+stipe_date <- ARKEV %>%
+  group_by(Date, Outplanting.group, Site) %>%
+  mutate(Date = format(as.Date(Date, format = "%Y-%m-%d"), "%m-%d")) %>% 
+   summarise(mean_stipe_length = mean(Stipe.Length, na.rm = TRUE),
+            se_stipe_length = sd(Stipe.Length, na.rm = TRUE) / sqrt(n()))
+
+str(stipe_date)
+
+# Plot
+library(directlabels)
+ggplot(stipe_days, aes(x = Days.Since.Outplanting, y = mean_stipe_length, color = as.factor(Site), linetype = Outplanting.group )) +
+  geom_line(size = 1.5) +
+  geom_point(size=2) +
+  geom_errorbar(aes(ymin = mean_stipe_length - se_stipe_length, ymax = mean_stipe_length + se_stipe_length), width = 0.2) +
+   geom_dl(aes(label = Outplanting.group), method = list(dl.trans(x=x+0.2), "last.points", cex = 1))+
+  labs(title = "Mean Stipe Length Over Time",
+       x = "Days Since Outplanting",
+       y = "Mean Stipe Length (cm)",
+       color = "Site",
+       linetype = "Outplanting Group") +
+  theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "none"
+  )
+
+```
+
+
+
+#stipe length
+```{r}
+library(ggplot2)
+# Filter data for Stipe Length
+BR_stipe_date <- date_BR_ARKEV %>% filter(MORPHOMETRIC == "Stipe length", mean_measurement != 0)
+BR_stipe_days <- days_BR_ARKEV %>% filter(MORPHOMETRIC == "Stipe length", mean_measurement != 0)
+
+# Plot for Stipe Length by outplanting days
+ggplot(BR_stipe_days, aes(x = Days.Since.Outplanting, y = mean_measurement, color = as.factor(UNIT.NUMBER), group = UNIT.NUMBER)) +
+  geom_line(size=1) +
+  geom_point(size=2) +
+  geom_errorbar(aes(ymin = mean_measurement - se_measurement, ymax = mean_measurement + se_measurement), width = 0.2) +
+  labs(title = "Big River Stipe Length Over Time",
+       x = "Days Since Outplanting",
+       y = "Mean Length (cm)",
+       color = "ARKEV Number") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+#Plot for Stipe Length by date  
+ggplot(BR_stipe_date, aes(x = factor(DATE), y = mean_measurement, color = as.factor(UNIT.NUMBER), group = UNIT.NUMBER)) +
+  geom_line(size=1) +
+  geom_point(size=2) +
+  geom_errorbar(aes(ymin = mean_measurement - se_measurement, ymax = mean_measurement + se_measurement), width = 0.2) +
+  labs(title = "Big River Stipe Length Over Time",
+       x = "Date",
+       y = "Mean Length (cm)",
+       color = "ARKEV Number") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+```
+
+
+#FISH
+```{r}
+# Filter data for all Fish On categories
+BR_fish_on_data <- date_BR_ARKEV %>% filter(MORPHOMETRIC %in% c("Fish on", "Fish on (1-5cm)", "Fish on (6-10cm)", "Fish on (11-15cm)", "Fish on (>15cm)"))
+
+# Plot for all Fish On categories
+ggplot(BR_fish_on_data, aes(x = DATE, y = mean_measurement, color = MORPHOMETRIC, group = interaction(MORPHOMETRIC, UNIT.NUMBER))) +
+  geom_line(size=1) +
+  geom_point(size=1) +
+  geom_errorbar(aes(ymin = mean_measurement - se_measurement, ymax = mean_measurement + se_measurement), width = 0.2) +
+  facet_wrap(~ UNIT.NUMBER) +
+  labs(title = "Big River Fish On ARKEV",
+       x = "Date",
+       y = "Fish Abundance",
+       color = "Morphometric") +
+theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+     axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+# Filter data for all Fish Off categories
+BR_fish_off_data <- date_BR_ARKEV %>% filter(MORPHOMETRIC %in% c("Fish off", "Fish off (1-5cm)", "Fish off (6-10cm)", "Fish off (11-15cm)", "Fish off (>15cm)"))
+
+# Plot for all Fish Off categories
+ggplot(BR_fish_off_data, aes(x = DATE, y = mean_measurement, color = MORPHOMETRIC, group = interaction(MORPHOMETRIC, UNIT.NUMBER))) +
+  geom_line(size=1) +
+  geom_point(size=1) +
+  geom_errorbar(aes(ymin = mean_measurement - se_measurement, ymax = mean_measurement + se_measurement), width = 0.2) +
+  facet_wrap(~ UNIT.NUMBER) +
+  labs(title = "Big River Fish Off ARKEV Over Time",
+       x = "Date",
+       y = "Fish Abundance",
+       color = "Morphometric") +
+ theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+```
+
+```{r}
+# Filter data for only Fish On and Fish Off
+BR_fish <- BR_ARKEV %>% filter(MORPHOMETRIC %in% c("Fish on", "Fish off"))
+
+# Summarize data by UNIT.NUMBER, DATE, and MORPHOMETRIC
+BR_fish_data <- BR_fish %>%
+  group_by(DATE, MORPHOMETRIC, UNIT.NUMBER) %>%
+  summarise(
+    mean_measurement = mean(MEASUREMENT, na.rm = TRUE),
+    se_measurement = sd(MEASUREMENT, na.rm = TRUE) / sqrt(n()),
+  )
+
+
+library(ggplot2)
+library(RColorBrewer)
+# Plot for Fish On and Fish Off over time
+ggplot(BR_fish_data, aes(x = DATE, y = mean_measurement, color = MORPHOMETRIC, group = interaction(MORPHOMETRIC, UNIT.NUMBER))) +
+  scale_color_brewer(palette = "Dark2") +
+  geom_line(size=1) +
+  geom_point(size=1) +
+  geom_errorbar(aes(ymin = mean_measurement - se_measurement, ymax = mean_measurement + se_measurement), width = 0.2) +
+  labs(title = "Big River Fish On/Off ARKEV Over Time",
+       x = "Date",
+       y = "Fish Abundance (# Individuals)",
+       color = "Morphometric",
+       linetype = "Morphometric") +
+  facet_wrap(~ UNIT.NUMBER) +
+  theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank()
+  )
+
+
+# Calculate mean and SE across all units for Fish On and Fish Off
+BR_fish_summary <- BR_fish_data %>%
+  group_by(DATE, MORPHOMETRIC) %>%
+  summarise(
+    mean_measurement = mean(mean_measurement, na.rm = TRUE),
+    se_measurement = sd(mean_measurement, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Plot for mean Fish On and Fish Off over time across all units
+ggplot(BR_fish_summary, aes(x = DATE, y = mean_measurement, color = MORPHOMETRIC, group = MORPHOMETRIC)) +
+  scale_color_brewer(palette = "Dark2") +
+  geom_line(size = 1.5) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_measurement - se_measurement, ymax = mean_measurement + se_measurement), width = 0.2) +
+  labs(title = "Big River Fish Abundance",
+       x = "Date",
+       y = "Mean Fish Count ",
+       color = "Morphometric",
+       linetype = "Morphometric") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12, face = "bold")
+  )
+
+```
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(car)  # For Anova function with type III sum of squares
+
+# Fit the two-way ANOVA model
+fish_anova <- aov(mean_measurement ~ MORPHOMETRIC * DATE, data = BR_fish_data)
+
+# View summary of the model
+summary(fish_anova)
+
+# For more detailed analysis with type III sum of squares
+Anova(fish_anova, type = "III")
+
+# Load the emmeans package
+library(emmeans)
+
+# Post-hoc pairwise comparisons
+posthoc_results <- emmeans(fish_anova, pairwise ~ MORPHOMETRIC | DATE)
+
+# Display the post-hoc test results
+summary(posthoc_results)
+
+```
+
+```{r}
+
+# Calculate Kelp_Count for Big River
+BR_kelp_count <- ARKEV %>%
+  filter(Site == "Big River") %>%                    # Filter for Big River site
+  group_by(Date, Unit) %>%                    # Group by Date and Unit
+  summarise(
+    Number.of.Individuals = first(Number.of.Individuals),  # Take the first count per unit per date
+    .groups = "drop"
+  ) %>%
+  group_by(Date) %>%                                  # Now group by Date to sum counts
+  summarise(
+    Kelp_Count = sum(Number.of.Individuals, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+# Plot fish abundance and overlay kelp counts
+ggplot() +
+  # Fish abundance line and error bars
+  geom_line(data = BR_fish_summary, aes(x = DATE, y = mean_measurement, color = MORPHOMETRIC), size = 1.5) +
+  geom_point(data = BR_fish_summary, aes(x = DATE, y = mean_measurement, color = MORPHOMETRIC)) +
+  geom_errorbar(data = BR_fish_summary, aes(x = DATE, ymin = mean_measurement - se_measurement, ymax = mean_measurement + se_measurement, color = MORPHOMETRIC), width = 0.2) +
+
+  # Kelp count line on secondary axis
+  geom_line(data = BR_kelp_count, aes(x = Date, y = Kelp_Count / max(Kelp_Count) * max(BR_fish_summary$mean_measurement), color = "Kelp Count"), size = 1.5, linetype = "dotted") +
+  geom_point(data = BR_kelp_count, aes(x = Date, y = Kelp_Count / max(Kelp_Count) * max(BR_fish_summary$mean_measurement), color = "Kelp Count")) +
+
+  # Custom color palette and labels
+  scale_color_brewer(palette = "Dark2") +
+  labs(title = "Big River Fish and Kelp Counts",
+       x = "Date",
+       y = "Mean Fish Abundance",
+       color = "Measurement Type",
+       linetype = "Measurement Type") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12, face = "bold")
+  ) +
+
+  # Add secondary y-axis for kelp count
+  scale_y_continuous(sec.axis = sec_axis(~ . * max(BR_kelp_count$Kelp_Count) / max(BR_fish_summary$mean_measurement), name = "# Spliced Individuals"))
+```
+
+```{r}
+BR_fish_summary_b <- BR_fish_data %>%
+  filter(DATE != "2024-07-18")
+
+# Plot fish abundance
+ggplot() +
+  # Fish abundance line and error bars
+  geom_line(data = BR_fish_summary_b, aes(x = DATE, y = mean_measurement, color = MORPHOMETRIC), size = 1.5) +
+  geom_point(data = BR_fish_summary_b, aes(x = DATE, y = mean_measurement, color = MORPHOMETRIC)) +
+  geom_errorbar(data = BR_fish_summary_b, aes(x = DATE, ymin = mean_measurement - se_measurement, ymax = mean_measurement + se_measurement, color = MORPHOMETRIC), width = 0.2) +
+   labs(title = "Big River Fish Counts",
+       x = "Date",
+       y = "Mean Fish Abundance") +
+   theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12, face = "bold")
+  )
+```
+
+
+
+```{r}
+
+BR_urchin_data <- date_BR_ARKEV %>% 
+  filter(MORPHOMETRIC %in% c("Purple urchin", "Red urchin")) %>% 
+  mutate(Density = mean_measurement/3.14)
+
+# Plot for urchin over time
+ggplot(BR_urchin_data, aes(x = DATE, y = Density, color = MORPHOMETRIC, linetype = MORPHOMETRIC, group = interaction(MORPHOMETRIC, UNIT.NUMBER))) +
+  scale_color_manual(values = c("Red urchin" = "red", "Purple urchin" = "purple")) + 
+  geom_line(size=1) +
+  geom_point(size=1) +
+  labs(title = "Big River Urchin Density around AKREV",
+       x = "Date",
+       y = "Urchin Density (per m^2)",
+       color = "Morphometric",
+       linetype = "Morphometric") +
+  facet_wrap(~ UNIT.NUMBER) +
+  theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size=12, face= "bold")
+  )
+
+# Calculate the overall density for each date and morphometric type
+BR_urchin_density <- BR_urchin_data %>%
+  group_by(DATE, MORPHOMETRIC) %>%
+  summarise(mean_density = mean(Density, na.rm = TRUE))
+
+# Plot overall urchin density across time for both types
+ggplot(BR_urchin_density, aes(x = factor(DATE), y = mean_density, color = MORPHOMETRIC, group = MORPHOMETRIC)) +
+  scale_color_manual(values = c("Red urchin" = "red", "Purple urchin" = "purple")) + 
+  scale_linetype_manual(values = c("Purple urchin" = "solid", "Red urchin" = "dashed")) + 
+  geom_line(size = 1) +
+  geom_point(size = 1) +
+  labs(
+    title = "Overall Urchin Density Over Time",
+    x = "Date",
+    y = "Urchin Density (per m²)",
+    color = "Urchin Type",
+    linetype = "Urchin Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size=12, face= "bold")
+  )
+
+```
+
+#urchin size 
+```{r}
+BR_urchin_size = read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/BR urchin.csv")
+BR_urchin_size <- BR_urchin_size %>%
+   mutate(date = as.Date(date, format = "%m/%d/%Y"))
+str(BR_urchin_size)
+```
+
+```{r}
+library(dplyr)
+
+# Calculate mean and SE for Purple and Red Urchin Density by Line and Location
+urchin_summary <- BR_urchin_size %>%
+  group_by(Array, Location) %>%
+  summarise(
+    mean_purple_density = mean(Purple.urchin.density, na.rm = TRUE),
+    se_purple_density = sd(Purple.urchin.density, na.rm = TRUE) / sqrt(n()),
+    mean_red_density = mean(Red.urchin.density, na.rm = TRUE),
+    se_red_density = sd(Red.urchin.density, na.rm = TRUE) / sqrt(n())
+  )
+
+library(ggplot2)
+
+# Plot for Purple Urchin Density
+ggplot(urchin_summary, aes(x = Location, y = mean_purple_density)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = mean_purple_density - se_purple_density, ymax = mean_purple_density + se_purple_density), 
+                width = 0.2, position = position_dodge(0.9)) +
+  facet_wrap(~ Array) +
+  labs(title = "Purple Urchin Density by Location",
+       x = "Location",
+       y = "Mean Purple Urchin Density (per m^2)") +
+    theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size=12, face= "bold"),
+    legend.text = element_text(size=12, face= "bold")
+  )
+
+# Plot for Red Urchin Density
+ggplot(urchin_summary, aes(x = Location, y = mean_red_density)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = mean_red_density - se_red_density, ymax = mean_red_density + se_red_density), 
+                width = 0.2, position = position_dodge(0.9)) +
+  geom_text(data = data.frame(Location = "L", Red.urchin.density = 0, Array = "4-6"),
+            aes(x = Location, y = Red.urchin.density, label = "0"), vjust = -0.5, color = "black", size = 5) +
+  facet_wrap(~ Array) +
+  labs(title = "Red Urchin Density by Location",
+       x = "Location",
+       y = "Mean Red Urchin Density (per m^2)") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size=12, face= "bold"),
+    legend.text = element_text(size=12, face= "bold")
+  )
+```
+
+```{r}
+# Summarize mean and SE for purple and red urchin densities by distance from drift
+urchin_distance_summary <- BR_urchin_size %>%
+  group_by(Distance.from.Drift) %>%
+  summarise(
+    mean_purple_density = mean(Purple.urchin.density, na.rm = TRUE),
+    se_purple_density = sd(Purple.urchin.density, na.rm = TRUE) / sqrt(n()),
+    mean_red_density = mean(Red.urchin.density, na.rm = TRUE),
+    se_red_density = sd(Red.urchin.density, na.rm = TRUE) / sqrt(n())
+  )
+
+library(ggplot2)
+
+# Plot for Purple Urchin Density by Distance
+ggplot(urchin_distance_summary, aes(x = Distance.from.Drift, y = mean_purple_density)) +
+  geom_bar(stat = "identity", fill = "purple", color = "black", width = 3) +
+  geom_errorbar(aes(ymin = mean_purple_density - se_purple_density, ymax = mean_purple_density + se_purple_density), width = 0.5) +
+  labs(title = "Purple Urchin Density by Distance from Drift",
+       x = "Distance from Drift",
+       y = "Mean Purple Urchin Density (per m^2)") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size=12, face= "bold"),
+    legend.text = element_text(size=12, face= "bold")
+  )
+
+# Plot for Red Urchin Density by Distance
+ggplot(urchin_distance_summary, aes(x = Distance.from.Drift, y = mean_red_density)) +
+  geom_bar(stat = "identity", fill = "red", color = "black", width = 3) +
+  geom_errorbar(aes(ymin = mean_red_density - se_red_density, ymax = mean_red_density + se_red_density), width = 0.5) +
+  labs(title = "Red Urchin Density by Distance from Drift",
+       x = "Distance from Drift",
+       y = "Mean Red Urchin Density (per m^2") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size=12, face= "bold"),
+    legend.text = element_text(size=12, face= "bold")
+  )
+```
+
+```{r}
+urchin_distance_summary <- BR_urchin_size %>%
+  group_by(Distance.from.Drift) %>%
+  summarise(
+    mean_purple_density = mean(Purple.urchin.density, na.rm = TRUE),
+    se_purple_density = sd(Purple.urchin.density, na.rm = TRUE) / sqrt(n()),
+    mean_red_density = mean(Red.urchin.density, na.rm = TRUE),
+    se_red_density = sd(Red.urchin.density, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  pivot_longer(cols = starts_with("mean"), 
+               names_to = "Urchin_Type", 
+               values_to = "Mean_Density") %>%
+  pivot_longer(cols = starts_with("se"), 
+               names_to = "SE_Type", 
+               values_to = "SE_Density") %>%
+  filter(substring(Urchin_Type, 6) == substring(SE_Type, 4))%>%
+  mutate(Urchin_Type = ifelse(Urchin_Type == "mean_purple_density", "Purple Urchin", "Red Urchin"))
+
+ggplot(urchin_distance_summary, aes(x = Distance.from.Drift, y = Mean_Density, fill = Urchin_Type, color = Urchin_Type)) +
+  geom_bar(stat = "identity", position = "dodge", width = 3) +
+  geom_errorbar(aes(ymin = Mean_Density - SE_Density, ymax = Mean_Density + SE_Density), 
+                width = 0.5, position = position_dodge(3),
+                color = "black") +
+  scale_fill_manual(values = c("Purple Urchin" = "purple", "Red Urchin" = "red")) +
+  scale_color_manual(values = c("Purple Urchin" = "purple", "Red Urchin" = "red")) +
+  labs(title = "Urchin Density by Distance from Drift",
+       x = "Distance from Drift (m)",
+       y = "Urchin Density (per m^2)",
+       fill = "Urchin Type",
+       color = "Urchin Type") +
+ theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"), 
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size=12, face= "bold")
+  )
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+# Calculate mean size for each urchin, excluding zeros in the size columns
+BR_urchin_size <- BR_urchin_size %>%
+  mutate(
+    Purple_urchin_mean_size = rowMeans(select(., starts_with("Purple.urchin.size")) %>% 
+                                         replace(. == 0, NA), na.rm = TRUE),
+    Red_urchin_mean_size = rowMeans(select(., starts_with("Red.urchin.size")) %>% 
+                                         replace(. == 0, NA), na.rm = TRUE)
+  )
+
+# Summarize mean and SE for each urchin size by distance
+urchin_size_summary <- BR_urchin_size %>%
+  group_by(Distance.from.Drift) %>%
+  summarise(
+    mean_purple_size = mean(Purple_urchin_mean_size, na.rm = TRUE),
+    se_purple_size = sd(Purple_urchin_mean_size, na.rm = TRUE) / sqrt(n()),
+    mean_red_size = mean(Red_urchin_mean_size, na.rm = TRUE),
+    se_red_size = sd(Red_urchin_mean_size, na.rm = TRUE) / sqrt(n())
+  )
+
+```
+
+```{r}
+library(tidyr)
+
+# Pivot longer for combined plotting
+urchin_size_summary_long <- urchin_size_summary %>%
+  pivot_longer(cols = starts_with("mean"), names_to = "Urchin_Type", values_to = "Mean_Size") %>%
+  pivot_longer(cols = starts_with("se"), names_to = "SE_Type", values_to = "SE_Size") %>%
+  filter(substring(Urchin_Type, 6) == substring(SE_Type, 4)) %>%
+  mutate(Urchin_Type = ifelse(Urchin_Type == "mean_purple_size", "Purple Urchin", "Red Urchin"))
+
+# Plot combined urchin size by distance
+ggplot(urchin_size_summary_long, aes(x = Distance.from.Drift, y = Mean_Size, fill = Urchin_Type, color = Urchin_Type)) +
+  geom_bar(stat = "identity", position = "dodge", width = 3) +
+  geom_errorbar(aes(ymin = Mean_Size - SE_Size, ymax = Mean_Size + SE_Size),
+                color = "black",
+                width = 0.5, position = position_dodge(3)) +
+  annotate("text", x = 0, y = 0, label = "0", vjust = -0.5, hjust= -0.5, color = "black", size = 5) +
+  annotate("text", x = 20, y = 0, label = "0", vjust = -0.5, hjust = -0.5, color = "black", size = 5) +
+  scale_fill_manual(values = c("Purple Urchin" = "purple", "Red Urchin" = "red")) +
+  scale_color_manual(values = c("Purple Urchin" = "purple", "Red Urchin" = "red")) +
+  labs(title = "Urchin Size by Distance from Drift",
+       x = "Distance from Drift",
+       y = "Mean Urchin Size (mm)",
+       fill = "Urchin Type",
+       color = "Urchin Type") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"), 
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size=12, face= "bold")
+  )
+
+
+# Filter for Purple Urchins only
+purple_urchin_data <- urchin_size_summary_long %>%
+  filter(Urchin_Type == "Purple Urchin")
+
+# Plot for Purple Urchins
+ggplot(purple_urchin_data, aes(x = Distance.from.Drift, y = Mean_Size, fill = Urchin_Type, color = Urchin_Type)) +
+  geom_bar(stat = "identity", position = "dodge", width = 3) +
+  geom_errorbar(aes(ymin = Mean_Size - SE_Size, ymax = Mean_Size + SE_Size),
+                color = "black",
+                width = 0.5, position = position_dodge(3)) +
+  scale_fill_manual(values = c("Purple Urchin" = "purple")) +
+  scale_color_manual(values = c("Purple Urchin" = "purple")) +
+  labs(title = "Purple Urchin Size by Distance from Drift",
+       x = "Distance from Drift",
+       y = "Mean Urchin Size (mm)",
+       fill = "Urchin Type",
+       color = "Urchin Type") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"), 
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "none"
+   
+  )
+```
+
+
+#GRAZING ASSAY
+```{r}
+ga_data = read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/Grazer Assay.csv")
+str(ga_data)
+```
+
+```{r}
+library(dplyr)
+
+# Summarize kelp weight by Drift.Added and Time (pre/post)
+ga_summary <- ga_data %>%
+  group_by(Drift.Added, Time) %>%
+  summarise(mean_weight = mean(Kelp.weight..g., na.rm = TRUE),
+            se_weight = sd(Kelp.weight..g., na.rm = TRUE) / sqrt(n()))
+
+ga_site_summary <- ga_data %>%
+  group_by(Site, Drift.Added, Time) %>%
+  summarise(
+    mean_weight = mean(Kelp.weight..g., na.rm = TRUE),
+    se_weight = sd(Kelp.weight..g., na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = Time, values_from = c(mean_weight, se_weight)) %>%  # Spread pre and post weights into columns
+  mutate(
+    Percent_Change = ((mean_weight_POST - mean_weight_PRE) / mean_weight_PRE) * 100,
+    Site = factor(Site, levels = c("Albion control", "Big River", "Albion restoration"))
+  )
+
+ga_summary <- ga_summary %>%
+  mutate(Time = factor(Time, levels = c("PRE", "POST")))
+
+ggplot(ga_site_summary, aes(x = Site, y = Percent_Change, fill = Drift.Added)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Percent loss of Grazer Assay Kelp",
+       x = "Site",
+       y = "",
+       fill = "Drift Added") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 0, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "top"
+  )
+
+
+library(ggplot2)
+
+# Bar plot for kelp weight comparison with reordered Time
+ggplot(ga_summary, aes(x = Time, y = mean_weight, fill = Drift.Added)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "Kelp Weight on Grazing Assays",
+       x = "Time (Pre/Post)",
+       y = "Mean Kelp Weight (g)",
+       fill = "Drift Added") +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+```
+
+```{r}
+library(dplyr)
+
+# Calculate mean change in weight and SE for each Site and Drift.Added group
+ga_weight_change <- ga_data %>%
+  # Group by Site, Drift.Added, and each Unit or Sample if available for paired pre/post comparison
+  group_by(Site, Drift.Added, Time) %>%
+  summarise(
+    mean_weight = mean(Kelp.weight..g., na.rm = TRUE),
+    se_weight = sd(Kelp.weight..g., na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+ga_weight_change <- ga_weight_change %>%
+pivot_wider(names_from = Time, values_from = c(mean_weight, se_weight)) # Reshape to have PRE and POST in separate columns
+ga_weight_change <- ga_weight_change %>%  
+mutate(
+    Weight_Change = mean_weight_POST - mean_weight_PRE,
+    Weight_se = sqrt(se_weight_POST^2 + se_weight_PRE^2)
+)
+
+ggplot(ga_weight_change, aes(x = Site, y = Weight_Change, fill = Drift.Added)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = Weight_Change - Weight_se, ymax = Weight_Change + Weight_se),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "24 hr Change in Grazer Assay Kelp Weight (g)",
+       x = "",
+       y = "Mean Change in Kelp Weight (g)",
+       fill = "Drift Added") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "top"
+  )
+
+```
+
+```{r}
+# Run a two-way ANOVA
+gd_aov <- aov(Weight_Change ~ Site * Drift.Added, data = ga_weight_change)
+
+# Summary of the ANOVA result
+summary(gd_aov)
+```
+
+```{r}
+ga_site_summary <- ga_data %>%
+  group_by(Site, Drift.Added, Time) %>%
+  summarise(mean_weight = mean(Kelp.weight..g., na.rm = TRUE),
+            se_weight = sd(Kelp.weight..g., na.rm = TRUE) / sqrt(n())) %>%
+  mutate(Time = factor(Time, levels = c("PRE", "POST")),
+         Site = factor(Site, levels = c( "Albion control", "Big River", "Albion restoration")))
+
+# Bar plot for kelp weight comparison with Site included
+ggplot(ga_site_summary, aes(x = Time, y = mean_weight, fill = Drift.Added)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "Kelp Weight by Site",
+       x = "Time (Pre/Post)",
+       y = "Mean Kelp Weight (g)",
+       fill = "Drift Added") +
+  facet_wrap(~ Site) +   # Create separate panels for each site
+   theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "top"
+  )
+
+
+#no legend
+ggplot(ga_site_summary, aes(x = Time, y = mean_weight, fill = Drift.Added)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "Kelp Weight by Site",
+       x = "Time (Pre/Post)",
+       y = "Mean Kelp Weight (g)",
+       fill = "Drift Added") +
+  facet_wrap(~ Site) +   # Create separate panels for each site
+   theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold"),
+    legend.position = "none"
+  )
+```
+
+```{r}
+# Run a two-way ANOVA
+ga_aov <- aov(Kelp.weight..g. ~ Time * Drift.Added, data = ga_data)
+
+# Summary of the ANOVA result
+summary(ga_aov)
+```
+
+```{r}
+# Diagnostic plots for ANOVA assumptions
+par(mfrow = c(2, 2))
+plot(ga_aov)
+```
+
+```{r}
+# Tukey's HSD post-hoc test
+TukeyHSD(ga_aov)
+```
+
+
+
+
+
+#albion arkev
+```{r}
+albion_ARKEV <- read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/Albion ARKEV.csv")
+albion_ARKEV <- albion_ARKEV %>%
+  mutate(Date = as.Date(Date, format = "%m/%d/%Y")) 
+str(albion_ARKEV)
+```
+
+```{r}
+library(dplyr)
+
+# Summarize stipe length by Date and Unit
+albion_stipe_unit <- albion_ARKEV %>%
+  group_by(Date, Line, Unit.Number) %>%
+  summarise(mean_stipe_length = mean(Measurement, na.rm = TRUE),
+            se_stipe_length = sd(Measurement, na.rm = TRUE) / sqrt(n()))
+
+library(ggplot2)
+
+# Plot mean and SE of stipe length over time for each unit
+ggplot(albion_stipe_unit, aes(x = Date, y = mean_stipe_length, color = as.factor(Line), linetype = as.factor(Unit.Number))) +
+  geom_line(size = 1) +
+  geom_point() +
+  geom_errorbar(aes(ymin = mean_stipe_length - se_stipe_length, ymax = mean_stipe_length + se_stipe_length), width = 0.2) +
+  labs(title = "Albion: Stipe Length Over Time",
+       x = "Date",
+       y = "Mean Stipe Length (cm)",
+       color = "Line",
+       linetype = "ARKEV Number") +
+  theme_bw()+
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, vjust = 0.6),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+```
+
+
+
+
+
+
+
+```{r}
+# Filter for Albion site and calculate mean and SE for stipe length over date
+stipe_albion_date <- ARKEV %>%
+  filter(Site == "Albion") %>%
+  mutate(Date = format(as.Date(Date, format = "%Y-%m-%d"), "%m-%d")) %>% 
+  group_by(Outplanting.group, Date) %>%
+  summarise(mean_stipe_length = mean(Stipe.Length, na.rm = TRUE),
+            se_stipe_length = sd(Stipe.Length, na.rm = TRUE) / sqrt(n())) 
+
+str(stipe_albion_date)
+
+# Plot stipe length over date for Albion site
+library(directlabels)
+ggplot(stipe_albion_date, aes(x = factor(Date), y = mean_stipe_length, color = Outplanting.group, linetype = Outplanting.group, group = Outplanting.group)) +
+  geom_line(size = 1.5) +
+  geom_point(size=2) +
+  geom_errorbar(aes(ymin = mean_stipe_length - se_stipe_length, ymax = mean_stipe_length + se_stipe_length), width = 0.2, size = 1) +
+  labs(title = "Albion Stipe Length by Outplanting Group",
+       x = "Date",
+       y = "Mean Stipe Length (cm)",
+       color = "Outplanting Group",
+       linetype = "Outplanting Group") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+```
+
+
+
+
+
+#sori/spore data
+```{r}
+albion_sori = read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/Albion ARKEV Harvest.csv")
+str(albion_sori)
+```
+
+```{r}
+# Calculate percent fertility and add it as a new column
+albion_sori <- albion_sori %>%
+  mutate(Percent_Fertility = (Number.of.reproductive.blades / Number.of.blades) * 100)
+
+ggplot(albion_sori, aes(x = Individual, y = Percent_Fertility, fill = ARKEV)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Percent Fertility by ARKEV",
+       x = "ARKEV",
+       y = "Reproductive Blades:Total Blades") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+# Calculate mean, SE, and estimated sori released across all individuals
+albion_sori_summary <- albion_sori %>%
+  summarise(
+    mean_blade_number = mean(Number.of.blades, na.rm = TRUE),
+    se_blade_number = sd(Number.of.blades, na.rm = TRUE)/ sqrt(n()),
+    mean_reproductive_blades = mean(Number.of.reproductive.blades, na.rm = TRUE),
+    se_reproductive_blades = sd(Number.of.reproductive.blades, na.rm = TRUE) / sqrt(n()),
+    estimated_sori_released_4day = mean(Number.of.reproductive.blades, na.rm = TRUE) * 7.5,
+    estimated_sori_released_6day = mean(Number.of.reproductive.blades, na.rm = TRUE) * 5
+  )
+
+# View the summary
+albion_sori_summary
+```
+
+
+```{r}
+albion_spore = read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/Albion ARKEV spore release.csv")
+str(albion_spore)
+```
+
+```{r}
+albion_spore_summary <- albion_spore %>%
+  group_by(Individual, Hour) %>%
+  summarise(
+    mean_spores_mL = mean(spores.mL, na.rm = TRUE),
+    se_spores_mL = sd(spores.mL, na.rm = TRUE) / sqrt(n()),
+    .groups = 'drop'
+  ) %>%
+  pivot_wider(
+    names_from = Hour,
+    values_from = c(mean_spores_mL, se_spores_mL),
+    names_prefix = "hr"
+  ) %>%
+  rename(mean_hr1 = mean_spores_mL_hr1,
+         se_hr1 = se_spores_mL_hr1,
+         mean_hr2 = mean_spores_mL_hr2,
+         se_hr2 = se_spores_mL_hr2)
+
+```
+
+```{R}
+# Ensure 'Individual' is consistent in both data frames
+albion_sori <- albion_sori %>% mutate(Individual = as.character(Individual))
+albion_spore_summary <- albion_spore_summary %>% mutate(Individual = as.character(Individual))
+
+# Combine albion_sori and albion_spore_summary by Individual
+albion_reproductive <- albion_sori %>%
+  left_join(albion_spore_summary, by = "Individual")
+
+
+albion_reproductive <- albion_reproductive %>%
+  select(-mean.spore.density..1.hr., -mean.spore.density..2.hr.) %>%
+  filter(ARKEV != "E")
+
+albion_reproductive 
+```
+
+```{r}
+#individual reproductive output
+albion_reproductive <- albion_reproductive %>% 
+  mutate(individual_reproductive_output = Number.of.reproductive.blades * (mean_hr1/3))
+
+# Calculate the mean individual reproductive output across all individuals
+mean_individual_reproductive_output <- albion_reproductive %>%
+  summarise(
+    mean_reproductive_output = mean(individual_reproductive_output, na.rm = TRUE),
+    se_reproductive_output = sd(individual_reproductive_output, na.rm = TRUE) / sqrt(n())
+  )
+
+# View the result
+mean_individual_reproductive_output
+
+ARKEV_output <- albion_reproductive %>%
+  group_by(ARKEV) %>%
+  summarize(total_reproductive_output = sum(individual_reproductive_output, na.rm = TRUE))
+```
+
+```{R}
+library(ggplot2)
+
+# Individual reproductive output plot
+ggplot(albion_reproductive, aes(x = ARKEV, y = individual_reproductive_output, fill = ARKEV)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Individual Reproductive Output per ARKEV",
+       x = "ARKEV",
+       y = "Reproductive output (spore/ml)") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+# Total reproductive output by ARKEV plot
+ ggplot(ARKEV_output, aes(x = ARKEV, y = total_reproductive_output, fill = ARKEV)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Total Reproductive Output per ARKEV",
+       x = "ARKEV",
+       y = "Reproductive Output (spore/ml)") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+```
+
+```{r}
+BR_harvest = read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/BR ARKEV Harvest.csv")
+str(BR_harvest)
+```
+```{r}
+# Calculate percent fertility and add it as a new column
+BR_sori <- BR_harvest %>%
+  mutate(Percent_Fertility = (Number.of.reproductive.blades / Number.of.blades) * 100)
+
+ggplot(BR_sori, aes(x = Individual, y = Percent_Fertility, fill = ARKEV)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Percent Fertility by ARKEV",
+       x = "ARKEV",
+       y = "Reproductive Blades:Total Blades") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold", angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 15, face = "bold"), 
+    title = element_text(size = 15, face = "bold")
+  )
+
+# Calculate mean, SE, and estimated sori released across all individuals
+BR_sori_summary <- BR_sori %>%
+  summarise(
+    mean_blade_number = mean(Number.of.blades, na.rm = TRUE),
+    se_blade_number = sd(Number.of.blades, na.rm = TRUE)/ sqrt(n()),
+    mean_reproductive_blades = mean(Number.of.reproductive.blades, na.rm = TRUE),
+    se_reproductive_blades = sd(Number.of.reproductive.blades, na.rm = TRUE) / sqrt(n()),
+    estimated_sori_released_4day = mean(Number.of.reproductive.blades, na.rm = TRUE) * 7.5,
+    estimated_sori_released_6day = mean(Number.of.reproductive.blades, na.rm = TRUE) * 5
+  )
+
+# View the summary
+BR_sori_summary
+```
