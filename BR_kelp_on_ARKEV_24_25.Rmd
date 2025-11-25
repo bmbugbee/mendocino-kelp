@@ -1,0 +1,65 @@
+---
+title: "BR_kelp_on_ARKEV"
+author: "Sabrina Grant"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+#data set 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#installing packages
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr)
+library(ggplot2)
+
+#importing datasheet 
+BR_kelp_on_ARKEV = read_sheet('https://docs.google.com/spreadsheets/d/1l6NO6pFVohLwITTuSAvfbK4nDKBuvancQViwdqi8mGk/edit?gid=1287716153#gid=1287716153')
+
+
+kelp_on_ARKEV_clean <- BR_kelp_on_ARKEV %>%
+  mutate(stipe_length  = map_dbl(stipe_length,  ~ if (length(.x) == 0) NA_real_ else as.numeric(.x[1])),
+       kelp_on_ARKEV = map_dbl(kelp_on_ARKEV, ~ if (length(.x) == 0) NA_real_ else as.numeric(.x[1])),
+       date = as.Date(paste(year, month, day, sep = "-"))) %>%
+  dplyr::select(-og_ID)
+
+View(kelp_on_ARKEV_clean)
+```
+
+#Number of spliced sporophytes on ARKEVS
+```{r}
+num_kelp_on <- kelp_on_ARKEV_clean %>%
+  group_by(year, month) %>%
+  mutate(total_num = sum(kelp_on_ARKEV))
+```
+
+
+```{r}
+ggplot(num_kelp_on, aes(x = month, y = total_num, color = year, group = year)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+    scale_x_date(
+    date_breaks = "1 month",        # one tick per month
+    date_labels = "%b"              # short month names: Jan, Feb, Mar
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA)  # starts at 0, automatic upper limit
+  ) +
+  labs(title = "Total Number of Spliced Sporophytes on ARKEVs", x = "Month", 
+       y = "# Spliced Individuals", 
+       color = "Site") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_blank()
+  )
+```
+
