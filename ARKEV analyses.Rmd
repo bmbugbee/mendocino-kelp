@@ -843,7 +843,8 @@ purp_by_type <- purps_data %>%
 
 ggplot(
   purp_by_type,
-  aes(x = urch_size_class, y = mean_density, fill = ARKEV_type)) +
+  aes(x = urch_size_class, y = mean_density, fill = ARKEV_type)
+) +
   geom_col(position = position_dodge(0.9), width = 0.7, color = "black") +
   geom_errorbar(
     aes(
@@ -853,11 +854,14 @@ ggplot(
     position = position_dodge(0.9),
     width = 0.2
   ) +
-  scale_fill_manual(values = c("<2cm" = "#1b9e77", ">2cm" = "#d95f02")) +
+  scale_fill_manual(values = c(
+    "ARKEV_control" = "#1b9e77",
+    "ARKEV"         = "#d95f02"
+  )) +
   labs(
-    x = "Treatment",
+    x = "Size Class",
     y = "Purple urchin density (indv/m²)",
-    fill = "Size class"
+    fill = "Treatment"
   ) +
   theme_classic(base_size = 16) +
   theme(
@@ -866,6 +870,7 @@ ggplot(
     axis.text = element_text(color = "black"),
     panel.grid = element_blank()
   )
+
 ```
 #stats(ART ANOVA)
 ```{r}
@@ -980,29 +985,130 @@ ggplot(treatment_density, aes(x = ARKEV_type, y = mean_density, fill = urch_size
 ```
 #stats(AOV)
 ```{r}
-treatments_data_log <- treatments %>%
-  mutate(log_density = log(density + 1))
+#data is not normally distributed even after log transforming so I am going to do a non-parametric ART ANOVA again
 
-aov_treatment_density <- aov(
-  log_density ~ ARKEV_type * urch_size_class,
-  data = treatments_data_log
-)
-summary(aov_treatment_density)
+#convert to factors
+treatments$ARKEV_type <- factor(treatments$ARKEV_type)
+treatments$urch_size_class <- factor(treatments$urch_size_class)
 
-TukeyHSD(aov_treatment_density)
 
-#significant interactions
-## ARKEV_drift:<2cm-ARKEV:<2cm 
-## ARKEV:>2cm-ARKEV:<2cm  
-## ARKEV_control:>2cm-ARKEV_control:<2cm
-## ARKEV_drift:>2cm-ARKEV_drift:<2cm
-## ARKEV_drift:>2cm-ARKEV:>2cm
-## ARKEV_drift:>2cm-ARKEV_control:>2cm 
+#using a non-parametric Aligned Rank Transformation ANOVA, on original data no need to log transform
+library(ARTool)
+model_art <- art(density ~ ARKEV_type * urch_size_class, data = treatments)
+anova(model_art) #urch_size_class p < 2e-16
 
-#There is a significantly greater density of purple urchins of both size classes in the ARKEV with drift plots compared to the ARKEV plots. 
-#Across all treatments, density of <2cm is significantly greater than density of >2cm urchins. #Urchin density was only significantly greater in the >2cm ARKEV with drift plots compared to the control plots. 
+
+# Main effects
+art.con(model_art, "ARKEV_type")
+art.con(model_art, "urch_size_class")
+
+# Interaction-specific contrasts (if needed)
+art.con(model_art, "ARKEV_type:urch_size_class")
+
+
 
 ```
+#Urchin size class for Grazer Assays
+```{r}
+GA_size_class <- purps_data %>%
+  mutate(
+    ARKEV_type = case_when(
+      ARKEV_unit %in% c(
+        "2A", "2C", "2E", "2D", "2B",
+        "3A", "3C", "3E", "3B", "3D",
+        "5A", "5C", "5E", "5B", "5D",
+        "6A", "6C", "6E", "6D", "6B",
+        "7A", "7C", "7E", "7B", "7D"
+      ) ~ "ARKEV_drift",
+      
+      ARKEV_unit %in% c(
+        "C2A", "C2C", "C2E", "C2D", "C2B",
+        "C7A", "C7C", "C7E", "C7B", "C7D",
+        "C3A", "C3C", "C3E", "C3B", "C3D",
+        "C9A", "C9C", "C9E", "C9B", "C9D",
+        "C10A", "C10C", "C10E", "C10B", "C10D"
+      ) ~ "ARKEV_control_GA",
+      
+      TRUE ~ ARKEV_type)) %>%
+ filter(ARKEV_type != "ARKEV_control")%>%
+  filter(month %in% c("7", "8", "9"))%>%
+  mutate(month = factor(month, levels = c("7", "8", "9")))
+
+View(GA_size_class)
+
+GA_density <- GA_size_class %>%
+  group_by(month,ARKEV_type, urch_size_class) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd_density = sd(density, na.rm = TRUE))
+
+
+
+ggplot(GA_density, aes(x = ARKEV_type, y = mean_density, fill = urch_size_class)) +
+  geom_col(position = position_dodge(0.9), width = 0.7, color = "black") +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd_density,
+      ymax = mean_density + sd_density
+    ),
+    position = position_dodge(0.9),
+    width = 0.2
+  ) +
+  scale_fill_manual(values = c("<2cm" = "#1b9e77", ">2cm" = "#d95f02")) +
+  labs(
+    x = "Treatment",
+    y = "Purple urchin density (indv/m²)",
+    fill = "Size class"
+  ) +
+  facet_wrap(~ month) +   # <- add this line
+  theme_classic(base_size = 16) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )+ theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
+GA_density_total <- GA_size_class %>%
+  group_by(ARKEV_type, urch_size_class) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd_density = sd(density, na.rm = TRUE))
+
+
+
+ggplot(GA_density_total, aes(x = ARKEV_type, y = mean_density, fill = urch_size_class)) +
+  geom_col(position = position_dodge(0.9), width = 0.7, color = "black") +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd_density,
+      ymax = mean_density + sd_density
+    ),
+    position = position_dodge(0.9),
+    width = 0.2
+  ) +
+  scale_fill_manual(values = c("<2cm" = "#1b9e77", ">2cm" = "#d95f02")) +
+  labs(
+    x = "Treatment",
+    y = "Purple urchin density (indv/m²)",
+    fill = "Size class"
+  ) +
+  theme_classic(base_size = 16) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )+ theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+```
+```
+
 
 #Benthic community data (BR)
 ```{r}
@@ -1345,7 +1451,7 @@ set.seed(123)
 nmds_res <- metaMDS(comm_ne, distance = "bray", k = 2)
 
 # 7. PERMANOVA (not significant)
-permanova <- adonis2(comm_ne ~ ARKEV_type + month, data = meta_ne, method = "bray")
+permanova <- adonis2(comm_ne ~ ARKEV_type * month, data = meta_ne, method = "bray")
 permanova
 
 # 8. Plot NMDS
@@ -1393,6 +1499,10 @@ ggplot(site_scores_2, aes(x = NMDS1, y = NMDS2)) +
 ```{r}
 ###per month
 ggplot(site_scores_2, aes(x = NMDS1, y = NMDS2)) +
+    scale_fill_manual(values = c(
+    "ARKEV_control" = "#1b9e77",
+    "ARKEV"         = "#d95f02"
+  )) +
   geom_point(
     aes(color = ARKEV_type, shape = ARKEV_type),
     size  = 3.5,
@@ -1431,17 +1541,14 @@ pairwise_results
 library(vegan)
 
 months <- unique(meta_ne$month)
+set.seed(123)
+results <- lapply(months, function(m) {idx <- meta_ne$month == m
 
-results <- lapply(months, function(m) {
+adonis2(
 
-  idx <- meta_ne$month == m
-
-  adonis2(
     comm_ne[idx, ] ~ ARKEV_type,
     data = meta_ne[idx, ],
-    method = "bray"
-  )
-})
+    method = "bray")})
 
 names(results) <- paste0("Month_", months)
 
@@ -1506,7 +1613,7 @@ ggplot() +
     type = "t",
     linetype = "solid",
     size = 0.8,
-    alpha = 0.15,
+    alpha = 1,
     show.legend = FALSE
   ) +
   theme_minimal(base_size = 14) +
@@ -1567,8 +1674,9 @@ set.seed(123)
 nmds_month <- metaMDS(comm_ne, distance = "bray", k = 2)
 
 # 7. PERMANOVA (not significant)
-#permanova <- adonis2(comm_ne ~ ARKEV_type, data = meta_ne, method = "bray")
-#permanova
+set.seed(123)
+permanova <- adonis2(comm_ne ~ ARKEV_type, data = meta_ne, method = "bray")
+permanova
 
 # 8. Plot NMDS
 site_scores_3 <- as.data.frame(scores(nmds_month, display = "sites")) %>%
@@ -1585,7 +1693,7 @@ ggplot(site_scores_3, aes(x = NMDS1, y = NMDS2)) +
     aes(color = ARKEV_type),
     type  = "t",
     size  = 0.8,
-    alpha = 0.15
+    alpha = 0.8
   ) +
     scale_color_manual(values = c("ARKEV" = "#a6cee3", "ARKEV_control" = "#b2df8a", "ARKEV_drift" = "#1f78b4")) +
   facet_wrap(~ month) +
@@ -1596,6 +1704,36 @@ ggplot(site_scores_3, aes(x = NMDS1, y = NMDS2)) +
     color = "Treatment",
     shape = "Treatment"
   )
+```
+
+```{r}
+# make sure month is treated as a factor
+meta_ne$month <- as.factor(meta_ne$month)
+
+pairwise_results <- pairwise.adonis2(
+  comm_ne ~ month,
+  data        = meta_ne,
+  sim.method  = "bray",
+  p.adjust.m  = "bonferroni"   # or "holm", "BH", etc.
+)
+
+pairwise_results
+
+library(vegan)
+
+months <- unique(meta_ne$month)
+set.seed(123)
+results <- lapply(months, function(m) {idx <- meta_ne$month == m
+
+adonis2(
+
+    comm_ne[idx, ] ~ ARKEV_type,
+    data = meta_ne[idx, ],
+    method = "bray")})
+
+names(results) <- paste0("Month_", months)
+
+results
 ```
 
 ##ARKEV quadrants
@@ -1706,7 +1844,7 @@ nmds_res_qm <- metaMDS(comm_ne, distance = "bray", k = 2)
 
 # 7. PERMANOVA (not significant)
 permanova <- adonis2(comm_ne ~ ARKEV_type, data = meta_ne, method = "bray")
-#permanova
+permanova
 
 # 8. Plot NMDS
 site_scores_5 <- as.data.frame(scores(nmds_res_qm, display = "sites")) %>%
@@ -1724,7 +1862,7 @@ ggplot(site_scores_5, aes(x = NMDS1, y = NMDS2)) +
     aes(color = ARKEV_type),
     type  = "t",
     size  = 0.8,
-    alpha = 0.15
+    alpha = 0.7
   ) +
   facet_wrap(~ month) +
   theme_classic(base_size = 14) +
@@ -1735,6 +1873,37 @@ ggplot(site_scores_5, aes(x = NMDS1, y = NMDS2)) +
     shape = "Treatment"
   )
 ```
+```{r}
+# make sure month is treated as a factor
+meta_ne$month <- as.factor(meta_ne$month)
+
+pairwise_results <- pairwise.adonis2(
+  comm_ne ~ month,
+  data        = meta_ne,
+  sim.method  = "bray",
+  p.adjust.m  = "bonferroni"   # or "holm", "BH", etc.
+)
+
+pairwise_results
+
+library(vegan)
+
+months <- unique(meta_ne$month)
+set.seed(123)
+results <- lapply(months, function(m) {idx <- meta_ne$month == m
+
+adonis2(
+
+    comm_ne[idx, ] ~ ARKEV_type,
+    data = meta_ne[idx, ],
+    method = "bray")})
+
+names(results) <- paste0("Month_", months)
+
+results
+```
+
+
 ####NE per month
 ```{r}
 arkev_ne <- benthic_comm_quad_month %>%
@@ -2124,7 +2293,7 @@ ggplot(site_scores_9, aes(x = NMDS1, y = NMDS2)) +
     aes(color = factor(month), linetype = ARKEV_type),
     type        = "t",
     size        = 0.8,
-    alpha       = 0.15,
+    alpha       = 0.7,
     show.legend = TRUE
   ) +
   theme_minimal(base_size = 14) +
@@ -2168,7 +2337,7 @@ ggplot(site_scores_9, aes(x = NMDS1, y = NMDS2)) +
     aes(color = ARKEV_type),
     type  = "t",
     size  = 0.8,
-    alpha = 0.15
+    alpha = 0.7
   ) +
  scale_color_manual(
     values = c(
@@ -2311,9 +2480,27 @@ ggplot(first_last, aes(x = ARKEV_type,
   )  
 
 ```
-
-#
 ```{r}
+change_table <- first_last %>%
+  select(month, ARKEV_type, species_code, mean_cover, relative_cover) %>%
+  pivot_wider(
+    names_from = month,
+    values_from = c(mean_cover, relative_cover),
+    names_prefix = ""
+  ) %>%
+  # Replace NAs with 0 for missing species-month combinations
+  mutate(across(starts_with("mean_cover_"), ~replace_na(., 0)),
+         across(starts_with("relative_cover_"), ~replace_na(., 0))) %>%
+  # Compute change (Month 9 - Month 4)
+  mutate(
+    change_mean_cover = mean_cover_9 - mean_cover_4,
+    change_relative_cover = relative_cover_9 - relative_cover_4
+  ) %>%
+  # Arrange neatly
+  arrange(ARKEV_type, species_code)
+
+# View table
+change_table
 
 ```
 
