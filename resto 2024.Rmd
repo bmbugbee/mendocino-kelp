@@ -5,9 +5,13 @@ date: "2024-10-23"
 ---
 
 ```{r}
-library(tidyr) 
 library(dplyr)
-BR_ARKEV = read.csv("C:/Users/bmbug/OneDrive/Documents/MLML recovered/BEERPIGs/Bull Kelp Project/data/2024/BR ARKEV.csv")
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr)
+
+BR_ARKEV = read_sheet("https://docs.google.com/spreadsheets/d/13fY0AhXYNt-dCclyPmoUfENJmI65DOS5--1v7E7Yzrg/edit?gid=0#gid=0")
 BR_ARKEV = BR_ARKEV %>%
   mutate(DATE = as.Date(DATE, format = "%m/%d/%Y"),
          Date.of.Outplanting = as.Date(Date.of.Outplanting, format = "%m/%d/%Y"))
