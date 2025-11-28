@@ -1107,7 +1107,6 @@ ggplot(GA_density_total, aes(x = ARKEV_type, y = mean_density, fill = urch_size_
   )
 
 ```
-```
 
 
 #Benthic community data (BR)
@@ -2503,4 +2502,237 @@ change_table <- first_last %>%
 change_table
 
 ```
+
+#fish analyses
+```{r}
+fish_raw = read_sheet('https://docs.google.com/spreadsheets/d/1FhmZUcguN4L9MZjXnjwAShoP-qjgkM_PSHA_7za174o/edit')
+
+fish_raw = fish_raw %>%
+  mutate(size_cm = as.numeric(as.character(size_cm)))
+
+fish = read_sheet('https://docs.google.com/spreadsheets/d/15xPzazEZGQmVRTvH-H0jDeKfVJEajeiBuO3p0F8dS_M/edit?gid=0#gid=0')
+
+fish = fish %>%
+  mutate(
+    month = format(date, "%b"),
+    treatment = recode(treatment,
+                       "ARKEV" = "ARKEV",
+                       "ARKEV_control" = "Control",
+                       "fish_control" = "Blank_ARKEV")
+  )
+
+fish$month <- factor(fish$month, 
+                     levels = intersect(month.abb, unique(fish$month)))
+str(fish)
+```
+
+```{R}
+fish_monthly <- fish %>%
+  filter(month != "Oct") %>%
+  group_by(treatment, month) %>%
+  summarise(
+    mean_richness = mean(species_richness, na.rm = TRUE),
+    se_richness   = sd(species_richness, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+treat_colors <- c(
+  "ARKEV" = "#BA5A4A",
+  "Blank_ARKEV" = "#F4A14E",
+  "Control" = "#F9A38C"
+)
+
+ggplot(fish_monthly, aes(x = month, y = mean_richness, color = treatment, group = treatment)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean_richness - se_richness,
+                    ymax = mean_richness + se_richness),
+                width = 0.2) +
+  labs(
+    title = "Average Species Richness by Month",
+    x = "Month",
+    y = "Mean Species Richness",
+    color = "Treatment"
+  ) +
+    scale_color_manual(values = treat_colors) +
+  theme_bw(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5)
+  )
+
+ggplot(fish_monthly, aes(x = month, y = mean_richness, 
+                               fill = treatment)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = mean_richness - se_richness,
+                    ymax = mean_richness + se_richness),
+                width = 0.2,
+                position = position_dodge(width = 0.8)) +
+  labs(
+    title = "Average Species Richness by Month",
+    x = "Month",
+    y = "Mean Species Richness",
+    color = "Treatment") +
+    scale_fill_manual(values = treat_colors) +
+  theme_bw()
+```
+
+```{r}
+fish_treat_summary <- fish %>%
+  group_by(treatment) %>%
+  summarise(
+    mean_richness = mean(species_richness, na.rm = TRUE),
+    se_richness   = sd(species_richness, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+ggplot(fish_treat_summary, 
+       aes(x = treatment, y = mean_richness, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black", width = 0.7) +
+  geom_errorbar(aes(
+      ymin = mean_richness - se_richness,
+      ymax = mean_richness + se_richness
+    ),
+    width = 0.2,
+    size = 0.7
+  ) +
+  scale_fill_manual(values = treat_colors) +
+  theme_bw(base_size = 14) +
+  labs(title = "Average Species Richness by Treatment",
+    x = "Treatment",
+    y = "Average Species Richness",
+    fill = "Treatment"
+  )
+```
+
+```{r}
+fish$treatment <- factor(fish$treatment)
+kruskal.test(species_richness ~ treatment, data = fish)
+
+library(FSA)
+
+fish_dunn = dunnTest(species_richness ~ treatment, data = fish, method = "bh")
+fish_dunn$res
+```
+
+
+
+```{r}
+library(ggplot2)
+
+fish_treat_summary <- fish_treat_summary %>%
+  mutate(Letter = case_when(
+    treatment == "ARKEV" ~ "A",
+    treatment == "Control" ~ "B",
+    treatment == "Blank_ARKEV" ~ "AB"
+  ))
+
+treat_colors <- c(
+  "ARKEV"       = "#BA5A4A",
+  "Blank_ARKEV" = "#F4A14E",
+  "Control"     = "#F9A38C"
+)
+
+
+ggplot(fish_summary, aes(x = treatment, y = mean_richness, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black", width = 0.7) +
+  geom_errorbar(aes(ymin = mean_richness - se_richness,
+                    ymax = mean_richness + se_richness),
+                width = 0.2) +
+  geom_text(aes(label = Letter, y = mean_richness + se_richness + 0.2), size = 5) +
+  scale_fill_manual(values = treat_colors) +
+  theme_bw(base_size = 14) +
+  labs(title = "Average Species Richness by Treatment",
+    x = "Treatment",
+    y = "Average Species Richness",
+    fill = "Treatment"
+  )
+```
+
+```{r}
+fish_den_monthly <- fish %>%
+  filter(month != "Oct") %>%
+  group_by(treatment, month) %>%
+  summarise(
+    mean_density = mean(fish_density, na.rm = TRUE),
+    se_density  = sd(fish_density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+den_treat_colors <- c(
+  "ARKEV"       = "#1B9E77",
+  "Blank_ARKEV" = "#D95F02",
+  "Control"     = "#7570B3"
+)
+
+ggplot(fish_den_monthly, aes(x = month, y = mean_density, color = treatment, group = treatment)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                width = 0.2) +
+  labs(
+    title = "Average # of Fish by Treatment by Month",
+    x = "Month",
+    y = "Mean Fish Density",
+    color = "Treatment"
+  ) +
+    scale_color_manual(values = den_treat_colors) +
+  theme_bw(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5)
+  )
+
+ggplot(fish_den_monthly, aes(x = month, y = mean_density, 
+                               fill = treatment)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                width = 0.2,
+                position = position_dodge(width = 0.8)) +
+  labs(
+    title = "Average # of Fish by Treament by Month",
+    x = "Month",
+    y = "Mean Fish Density",
+    color = "Treatment") +
+    scale_fill_manual(values = den_treat_colors) +
+  theme_bw()
+```
+
+```{r}
+fish_den_summary <- fish %>%
+  group_by(treatment, location) %>%
+  summarise(
+    mean_density = mean(fish_density, na.rm = TRUE),
+    se_density   = sd(fish_density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+den_loc_colors <- c(
+  "fish_on"       = "darkgreen",
+  "fish_off" = "lightblue"
+)
+
+fish_den_summary$location <- factor(
+  fish_den_summary$location,
+  levels = c("fish_on", "fish_off"))
+
+ggplot(fish_den_summary, 
+       aes(x = treatment, y = mean_density, fill = location, )) +
+  geom_bar(stat = "identity", color = "black", width = 0.7, position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                position = position_dodge(width = 0.8),
+    width = 0.2,
+    size = 0.7
+  ) +
+  scale_fill_manual(values = den_loc_colors) +
+  theme_bw(base_size = 14) +
+  labs(title = "Average Number of Fish by Treatment",
+    x = "Treatment",
+    y = "Average Fish Density",
+    fill = "Location"
+  )
+```
+
+```{r}
 
