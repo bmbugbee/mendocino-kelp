@@ -725,6 +725,7 @@ KW_noaug <- kelp_weight %>%
 
 print(KW_noaug)
 ```
+
 ```{r}
 unique(kelp_weight$time)
 
@@ -788,7 +789,7 @@ ggplot(weight_change_month, aes(x = treatment, y = weight_change, fill = drift))
        x = "treatment",
        y = "Percent Change in Kelp Weight (g)"
        ) +
-  scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & arkev", "drift & arkev")) + 
+  scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & ARKEV", "DRIFT & ARKEV")) + 
   theme_classic() +
   theme(
     axis.text.x = element_text(size = 15, face = "bold", angle = 60, hjust = 0.5, vjust= 0.5),
@@ -808,10 +809,10 @@ ggplot(weight_change, aes(x = treatment, y = weight_change)) +
        x = "treatment",
        y = "Percent Change in Kelp Weight (g)"
        ) +
-   scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & arkev", "drift & arkev")) + 
+   scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & ARKEV", "DRIFT & ARKEV")) + 
   theme_classic() +
   theme(
-    axis.text.x = element_text(size = 15, face = "bold", hjust = 0.5, vjust= 0.5),
+    axis.text.x = element_text(size = 15, face = "bold", hjust = 0.5, vjust= 0.5, angle = 15),
     axis.text.y = element_text(size = 12, face = "bold"),
     axis.title.x = element_text(size = 15, face = "bold"),
     axis.title.y = element_text(size = 15, face = "bold"),
@@ -870,10 +871,10 @@ ggplot(noaug_weight_change, aes(x = treatment, y = weight_change)) +
                 width = 0.2, position = position_dodge(0.9)) +
   labs(
     title = " Change in Grazer Assay Kelp Weight (24 hr)",
-    x = "",
+    x = "Treatment",
     y = "Mean Change in Kelp Weight (%)"
   ) +
-  scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & arkev", "drift & arkev")) + 
+  scale_x_discrete(limits = c("NO_DRIFT & Control", "NO_DRIFT & ARKEV", "DRIFT & ARKEV")) + 
   theme_classic() +
   theme(
     axis.text.x = element_text(size = 15, face = "bold", angle = 15, hjust = 0.5, vjust = 0.5),
@@ -963,7 +964,7 @@ ggplot() +
   geom_bar(
     data = KW_noaug_summary_letters,
     aes(x = drift, y = mean_change),
-    stat = "identity", fill = "steelblue", alpha = 0.7, width = 0.6
+    stat = "identity", fill = "forestgreen", alpha = 0.7, width = 0.6
   ) +
   geom_errorbar(
     data = KW_noaug_summary_letters,
