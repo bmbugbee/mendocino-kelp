@@ -1592,8 +1592,8 @@ set.seed(123)
 nmds_res <- metaMDS(comm, distance = "bray", k = 2)
 
 # 7. PERMANOVA (not significant)
-#permanova <- adonis2(comm ~ ARKEV_type, data = meta, method = "bray")
-#permanova
+permanova <- adonis2(comm ~ ARKEV_type, data = meta, method = "bray")
+permanova
 
 # 8. Plot NMDS
 site_scores_3 <- as.data.frame(scores(nmds_res, display = "sites")) %>%
@@ -1734,6 +1734,148 @@ names(results) <- paste0("Month_", months)
 
 results
 ```
+####envfit model for significant months
+```{r}
+month_5 <- benthic_comm_treat_month %>%
+  filter(month == "5")
+
+
+meta_month_5 <- month_5 %>%
+  dplyr::select(ARKEV_type, ARKEV_unit)
+
+comm_month_5 <- month_5 %>%
+  dplyr::select(-ARKEV_type, -ARKEV_unit)
+
+
+row_sums <- rowSums(comm_month_5)
+non_empty <- row_sums > 0
+sum(row_sums == 0)
+comm_ne_5 <- comm_month_5[non_empty, ]
+meta_ne_5 <- meta_month_5[non_empty, ]
+
+
+# 6. NMDS
+set.seed(123)
+nmds_month_5 <- metaMDS(comm_ne_5, distance = "bray", k = 2)
+
+#getting species vectors 
+species_fit <- envfit(nmds_month_5, comm_ne_5, permutations = 999)
+
+scores_sites <- as.data.frame(scores(nmds_month_5, display = "sites"))
+scores_sites <- cbind(scores_sites, meta_ne_5)
+
+scores_species <- as.data.frame(scores(species_fit, display = "vectors"))
+scores_species$species <- rownames(scores_species)
+scores_species$pval <- species_fit$vectors$pvals
+
+sig_species <- scores_species %>%
+  dplyr::arrange(pval) %>%
+  dplyr::slice(1:10)
+
+
+
+library(ggplot2)
+library(ggrepel)
+
+ggplot(scores_sites, aes(x = NMDS1, y = NMDS2, color = ARKEV_type)) +
+  geom_point(size = 3) +
+  stat_ellipse(aes(group = ARKEV_type), level = 0.95) +
+geom_segment(
+    data = sig_species,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+    arrow = arrow(length = unit(0.2, "cm")),
+    color = "black"
+  ) +
+  geom_text_repel(
+    data = sig_species,
+    inherit.aes = FALSE,
+    aes(x = NMDS1, y = NMDS2, label = species),
+    size = 3,
+    color = "black"
+  ) +
+  theme_classic() +
+  labs(
+    title = "NMDS – Month 5",
+    color = "ARKEV type"
+  ) +
+  scale_color_manual(
+    values = c(
+      "ARKEV"         = "#a6cee3",
+      "ARKEV_control" = "#b2df8a",
+      "ARKEV_drift"   = "#1f78b4"
+    )
+  )
+
+```
+```{r}
+month_9 <- benthic_comm_treat_month %>%
+  filter(month == 9)
+
+meta_month_9 <- month_9 %>%
+  dplyr::select(ARKEV_type, ARKEV_unit)
+
+comm_month_9 <- month_9 %>%
+  dplyr::select(-ARKEV_type, -ARKEV_unit)
+
+row_sums_9 <- rowSums(comm_month_9)
+non_empty_9 <- row_sums_9 > 0
+comm_ne_9 <- comm_month_9[non_empty_9, ]
+meta_ne_9 <- meta_month_9[non_empty_9, ]
+
+set.seed(123)
+nmds_month_9 <- metaMDS(comm_ne_9, distance = "bray", k = 2)
+
+species_fit_9 <- envfit(nmds_month_9, comm_ne_9, permutations = 999)
+
+scores_sites_9 <- as.data.frame(scores(nmds_month_9, display = "sites"))
+scores_sites_9 <- cbind(scores_sites_9, meta_ne_9)
+
+scores_species_9 <- as.data.frame(scores(species_fit_9, display = "vectors"))
+scores_species_9$species <- rownames(scores_species_9)
+scores_species_9$pval <- species_fit_9$vectors$pvals
+
+
+sig_species_9 <- scores_species_9 %>%
+  dplyr::filter(pval < 0.05) %>%
+  dplyr::arrange(pval) %>%
+  dplyr::slice(1:10)
+
+
+library(ggplot2)
+library(ggrepel)
+
+ggplot(scores_sites_9, aes(x = NMDS1, y = NMDS2, color = ARKEV_type)) +
+  geom_point(size = 3) +
+  stat_ellipse(aes(group = ARKEV_type), level = 0.95) +
+  geom_segment(
+    data = sig_species_9,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+    arrow = arrow(length = unit(0.2, "cm")),
+    color = "black"
+  ) +
+  geom_text_repel(
+    data = sig_species_9,
+    inherit.aes = FALSE,
+    aes(x = NMDS1, y = NMDS2, label = species),
+    size = 3,
+    color = "black"
+  ) +
+  theme_classic() +
+  labs(
+    title = "NMDS – Month 9",
+    color = "ARKEV type"
+  ) +
+  scale_color_manual(
+    values = c(
+      "ARKEV"         = "#a6cee3",
+      "ARKEV_control" = "#b2df8a",
+      "ARKEV_drift"   = "#1f78b4"
+    )
+  )
+
+```
 
 ##ARKEV quadrants
 ```{r}
@@ -1770,6 +1912,15 @@ nmds_res <- metaMDS(comm_q, distance = "bray", k = 2)
 permanova <- adonis2(comm_q ~ ARKEV_type, data = meta_q, method = "bray")
 permanova
 
+pairwise_results <- pairwise.adonis2(
+  comm_q ~ ARKEV_type,
+  data        = meta_q,
+  sim.method  = "bray",
+  p.adjust.m  = "bonferroni"   # or "holm", "BH", etc.
+)
+
+pairwise_results
+
 # 8. Plot NMDS
 site_scores_4 <- as.data.frame(scores(nmds_res, display = "sites")) %>%
   bind_cols(meta_q)
@@ -1790,7 +1941,7 @@ ggplot() +
     alpha = 0.15,
     show.legend = FALSE
   ) +
-  theme_minimal(base_size = 14) +
+  theme_classic(base_size = 14) +
   labs(
     x = "NMDS1",
     y = "NMDS2",
@@ -1809,6 +1960,8 @@ ggplot() +
     axis.text = element_text(size = 12)
   )
 ```
+
+
 ###per month
 ```{r}
 benthic_comm_quad_month <- benthic_comm_balance %>%
@@ -2357,6 +2510,369 @@ ggplot(site_scores_9, aes(x = NMDS1, y = NMDS2)) +
     shape = "Treatment"
   )
 ```
+
+#2024 vs 2025
+```{r}
+both_years = read_sheet('https://docs.google.com/spreadsheets/d/1Z6wg7j9N0Re7aYNvnVBlg4Tf-roa88E2YaVylnP74Z8/edit?gid=642331766#gid=642331766')
+
+both_years
+
+both_years_MASTER <- both_years %>%
+# turn "NA" strings in character columns into real NA
+  mutate(across(where(is.character), ~ na_if(.x, "NA"))) %>%
+# list-columns that are truly numeric-ish
+  mutate(
+    count   = to_numeric(count),
+    percent = to_numeric(percent)
+  ) %>%
+# handle size_cm specially
+  mutate(
+# keep the original category (<2cm, >2cm, numbers) as a character column "urchin_size_class"
+    urch_size_class = map_chr(size_cm, ~ {
+      if (length(.x) == 0) return(NA_character_)
+      as.character(.x)
+    }),
+# numeric version: fish lengths only; urchin categories → NA
+    size_cm = map_dbl(size_cm, ~ {
+      if (length(.x) == 0) return(NA_real_)
+      if (is.character(.x)) {
+# drop urchin categories from numeric column
+        if (.x %in% c("<2cm", ">2cm")) return(NA_real_)
+        .x <- na_if(.x, "NA")
+      }
+      as.numeric(.x)
+    })
+  ) %>%
+  mutate(Date = make_date(year, month, day))
+
+
+all_benthic_data <- both_years_MASTER %>%
+  filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
+  dplyr::select(year, Date, month, ARKEV_type, ARKEV_unit, data_type,
+                species_code, count) %>%
+  mutate(
+    density = case_when(
+      year == 2024 ~ count,          # already per m²
+      year == 2025 ~ count / pi,     # convert 1 m radius counts to per m²
+      TRUE ~ NA_real_
+    )
+  )
+
+
+all_benthic_data_cleaned <- all_benthic_data %>%
+  filter(!(month == 10 & ARKEV_type == "ARKEV"), 
+       !(month == 8 & ARKEV_type == "ARKEV" & count == "NA"), 
+       !(month == 7 & ARKEV_type == "ARKEV_control" & ARKEV_unit == "C7A" & count == "NA"))
+
+
+all_benthic_comm_balance <- all_benthic_data_cleaned %>%
+  filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
+  mutate(
+    count   = tidyr::replace_na(count, 0),
+    density = tidyr::replace_na(density, 0)
+  ) %>%
+  group_by(year,Date, month, ARKEV_type, ARKEV_unit, species_code) %>%  # 🔴 KEY STEP
+  summarise(
+    density = sum(density, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from  = species_code,
+    values_from = density,
+    values_fill = 0
+  ) %>%
+  # drop the pseudo-species columns, KEEP the rows
+  select(-any_of(c("NO_INVERTS", "NO_KELP")))
+
+
+anyNA(all_benthic_comm_balance)
+
+```
+##Overall community comp
+```{r}
+benthic_comm_year <- all_benthic_comm_balance %>%
+  group_by(year, ARKEV_type, ARKEV_unit) %>%
+  summarise(
+    across(MESFRA:PARCAL, mean, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+# 1. Build meta and comm from the same benthic_comm
+meta_year <- benthic_comm_year %>%
+  dplyr::select(year, ARKEV_type, ARKEV_unit)
+
+comm_year <- benthic_comm_year %>%
+  dplyr::select(-year, -ARKEV_type, -ARKEV_unit)
+
+row_sums <- rowSums(comm_year)
+non_empty <- row_sums > 0
+sum(row_sums == 0)
+
+
+
+# 6. NMDS
+set.seed(123)
+nmds_yr <- metaMDS(comm_year, distance = "bray", k = 2)
+
+# 7. PERMANOVA (r2 = 0.088, p = 0.001)
+adonis2(comm_year ~ year, data = meta_year, method = "bray")
+
+
+# 8. Plot NMDS
+site_scores <- as.data.frame(scores(nmds_yr, display = "sites")) %>%
+  bind_cols(meta_year) %>%
+  mutate(year = as.factor(year))
+
+
+
+ggplot() +
+  geom_point(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = year),
+    size = 3.5, alpha = 0.85
+  ) +
+  stat_ellipse(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = year),
+    type = "t",
+    linetype = "solid",
+    size = 0.8,
+    alpha = 0.15,
+    show.legend = FALSE
+  ) +
+  theme_classic(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Year"
+  ) +
+  scale_color_manual(values = c("2024" = "darkblue", "2025" = "red3")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = NA),
+    legend.key.size = unit(0.8, "cm"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12)
+  )
+```
+```{r}
+# 1. Fit species vectors
+species_fit <- envfit(nmds_yr, comm_year, permutations = 999)
+
+# 2. Extract site scores and bind metadata (convert year to factor)
+scores_sites <- as.data.frame(scores(nmds_yr, display = "sites")) %>%
+  bind_cols(meta_year %>% mutate(year = as.factor(year)))   # <- key fix here
+
+# 3. Extract species scores
+scores_species <- as.data.frame(scores(species_fit, display = "vectors"))
+scores_species$species <- rownames(scores_species)
+scores_species$pval <- species_fit$vectors$pvals
+
+# 4. Keep top 10 most significant species
+sig_species <- scores_species %>%
+  arrange(pval) %>%
+  slice(1:10)
+
+# 5. NMDS plot
+ggplot(scores_sites, aes(x = NMDS1, y = NMDS2, color = year)) +
+  geom_point(size = 3) +
+  stat_ellipse(aes(group = year), level = 0.95) +
+  geom_segment(
+    data = sig_species,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+    arrow = arrow(length = unit(0.4, "cm")),
+    color = "black"
+  ) +
+geom_text_repel(
+  data = sig_species,
+  inherit.aes = FALSE,
+  aes(x = NMDS1, y = NMDS2, label = species),
+  size = 4.5,               # a little bigger
+  color = "black",
+  fontface = "bold",        # <- makes text bold
+  segment.color = NA        # optional: removes label connector lines
+)+
+  theme_classic() +
+  labs(
+    title = "NMDS – Yearly Comparison (2024 vs 2025)",
+    color = "Year"
+  ) +
+  scale_color_manual(values = c("2024" = "darkblue", "2025" = "red3"))
+
+```
+##per month
+```{r}
+benthic_comm_time <- all_benthic_comm_balance %>%
+  group_by(year, month, ARKEV_type, ARKEV_unit) %>%  # unit × month × year
+  summarise(
+    across(MESFRA:PARCAL, mean, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+meta_time <- benthic_comm_time %>%
+  dplyr::select(year, month, ARKEV_type, ARKEV_unit)
+
+comm_time <- benthic_comm_time %>%
+  dplyr::select(MESFRA:PARCAL)
+
+row_sums <- rowSums(comm_time)
+non_empty <- row_sums > 0
+sum(row_sums == 0)
+comm_ne <- comm_time[non_empty, ]
+meta_ne <- meta_time[non_empty, ]
+
+set.seed(123)
+nmds_time <- metaMDS(comm_ne, distance = "bray", k = 2)
+
+site_scores_time <- as.data.frame(scores(nmds_time, display = "sites")) %>%
+  bind_cols(meta_ne)
+library(dplyr)
+
+site_scores_time <- as.data.frame(scores(nmds_time, display = "sites")) %>%
+  bind_cols(meta_time)
+
+month_centroids <- site_scores_time %>%
+  group_by(year, month) %>%
+  summarise(
+    NMDS1 = mean(NMDS1),
+    NMDS2 = mean(NMDS2),
+    .groups = "drop"
+  ) %>%
+  arrange(year, month) %>%
+  mutate(
+    year = as.factor(year),
+    # label like "Apr-24", "May-24", etc. (customize if you want)
+    label = paste0(month, "/", substr(year, 3, 4)),
+    time_index = row_number()   # for ordering / gradients if needed
+  )
+
+ggplot(month_centroids, aes(x = NMDS1, y = NMDS2)) +
+  geom_path(
+    aes(group = 1),           # follow the arranged order
+    arrow = arrow(length = unit(0.25, "cm")),
+    linewidth = 0.7
+  ) +
+  geom_point(aes(color = year), size = 3) +
+  geom_text_repel(aes(label = label, color = year),
+                  size = 3, fontface = "bold", show.legend = FALSE) +
+  theme_classic() +
+  labs(
+    title = "Temporal trajectory of benthic community composition",
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Year"
+  ) +
+  scale_color_manual(values = c("2024" = "darkblue", "2025" = "red3"))
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+## 1. Monthly centroids (one point per month × year)
+month_centroids <- site_scores_time %>%
+  group_by(year, month) %>%
+  summarise(
+    NMDS1 = mean(NMDS1),
+    NMDS2 = mean(NMDS2),
+    .groups = "drop"
+  ) %>%
+  arrange(year, month) %>%
+  mutate(
+    year  = as.factor(year),
+    label = paste0(month, "/", substr(year, 3, 4))
+  )
+
+## 2. Clean trajectory plot
+ggplot(month_centroids, aes(NMDS1, NMDS2)) +
+  # separate path per year, with arrows
+  geom_path(aes(group = year, color = year),
+            arrow = arrow(type = "closed", length = unit(0.25, "cm")),
+            linewidth = 1) +
+  # points for each month
+  geom_point(aes(color = year), size = 3) +
+  # bold month labels
+  geom_text_repel(
+    aes(label = label, color = year),
+    size = 3.5,
+    fontface = "bold",
+    segment.color = "grey70",
+    show.legend = FALSE
+  ) +
+  scale_color_manual(values = c("2024" = "darkblue", "2025" = "red3")) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Temporal trajectory of benthic community composition",
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Year"
+  )
+
+```
+```{r}
+library(vegan)
+
+## 1. Make sure you’re using the same community matrix used for nmds_time
+##    Here I assume it’s called `comm_time_ne`.
+
+species_fit_time <- envfit(nmds_time, comm_ne, permutations = 999)
+
+scores_species <- as.data.frame(scores(species_fit_time, display = "vectors"))
+scores_species$species <- rownames(scores_species)
+scores_species$pval    <- species_fit_time$vectors$pvals
+
+## keep only significant / top species
+sig_species <- scores_species %>%
+  filter(pval < 0.05) %>%      # or arrange(pval) %>% slice(1:10)
+  arrange(pval)
+
+## 2. Plot: trajectories + species vectors
+ggplot(month_centroids, aes(NMDS1, NMDS2)) +
+  geom_path(aes(group = year, color = year),
+            arrow = arrow(type = "closed", length = unit(0.25, "cm")),
+            linewidth = 1) +
+  geom_point(aes(color = year), size = 3) +
+  geom_text_repel(
+    aes(label = label, color = year),
+    size = 3.5,
+    fontface = "bold",
+    segment.color = "grey70",
+    show.legend = FALSE
+  ) +
+  # species vectors
+  geom_segment(
+    data = sig_species,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+    arrow = arrow(length = unit(0.2, "cm")),
+    color = "black"
+  ) +
+  geom_text_repel(
+    data = sig_species,
+    inherit.aes = FALSE,
+    aes(x = NMDS1, y = NMDS2, label = species),
+    size = 3,
+    fontface = "bold",
+    color = "black",
+    segment.color = NA
+  ) +
+  scale_color_manual(values = c("2024" = "darkblue", "2025" = "red3")) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Temporal trajectory with species vectors",
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Year"
+  )
+
+```
+
 #Algal cover data 
 ```{r}
 cover_data <- doc_MASTER %>%
