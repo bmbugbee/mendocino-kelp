@@ -2357,6 +2357,7 @@ ggplot(site_scores_9, aes(x = NMDS1, y = NMDS2)) +
     shape = "Treatment"
   )
 ```
+
 #Algal cover data 
 ```{r}
 cover_data <- doc_MASTER %>%
@@ -2527,6 +2528,7 @@ str(fish)
 ```
 
 ```{R}
+library(ggplot2)
 fish_monthly <- fish %>%
   filter(month != "Oct") %>%
   group_by(treatment, month) %>%
@@ -2567,6 +2569,7 @@ ggplot(fish_monthly, aes(x = month, y = mean_richness,
                     ymax = mean_richness + se_richness),
                 width = 0.2,
                 position = position_dodge(width = 0.8)) +
+  
   labs(
     title = "Average Species Richness by Month",
     x = "Month",
@@ -2578,7 +2581,7 @@ ggplot(fish_monthly, aes(x = month, y = mean_richness,
 
 ```{r}
 fish_treat_summary <- fish %>%
-  group_by(treatment) %>%
+  group_by(treatment, location) %>%
   summarise(
     mean_richness = mean(species_richness, na.rm = TRUE),
     se_richness   = sd(species_richness, na.rm = TRUE) / sqrt(n()),
@@ -2602,16 +2605,66 @@ ggplot(fish_treat_summary,
     y = "Average Species Richness",
     fill = "Treatment"
   )
+
+fish_treat_summary$location <- factor(
+  fish_den_summary$location,
+  levels = c("fish_on", "fish_off"))
+
+trt_loc_colors <- c(
+  "fish_on"       = "#BA5A4A",
+  "fish_off" = "#F4A14E"
+)
+
+ggplot(fish_treat_summary, 
+       aes(x = treatment, y = mean_richness, fill = location)) +
+  geom_bar(
+    stat = "identity", 
+    color = "black", 
+    width = 0.7, 
+    position = position_dodge(width = 0.8)
+  ) +
+  geom_errorbar(
+    aes(
+      ymin = mean_richness - se_richness,
+      ymax = mean_richness + se_richness
+    ),
+    width = 0.2,
+    size = 0.7,
+    position = position_dodge(width = 0.8)
+  ) +
+  scale_fill_manual(values = trt_loc_colors) +
+  theme_bw(base_size = 14) +
+  labs(
+    title = "Average Species Richness by Treatment",
+    x = "Treatment",
+    y = "Average Species Richness",
+    fill = "Location"
+  )
+
 ```
 
 ```{r}
-fish$treatment <- factor(fish$treatment)
-kruskal.test(species_richness ~ treatment, data = fish)
+library(glmmTMB)
+library(DHARMa)
 
-library(FSA)
+fish <- fish %>%
+  mutate(
+    treatment = factor(treatment),
+    location  = factor(location),
+    ARKEV_ID  = factor(ARKEV_ID),
+    date      = factor(date)   # use factor for random effect
+  )
+```
 
-fish_dunn = dunnTest(species_richness ~ treatment, data = fish, method = "bh")
-fish_dunn$res
+```{r}
+rich_m_nb <- glmmTMB(
+  species_richness ~ treatment * location +
+    (1 | ARKEV_ID) +
+    (1 | date),
+  family = nbinom2(link = "log"),
+  data = fish
+)
+summary(rich_m_nb)
 ```
 
 
@@ -2633,7 +2686,7 @@ treat_colors <- c(
 )
 
 
-ggplot(fish_summary, aes(x = treatment, y = mean_richness, fill = treatment)) +
+ggplot(fish_treat_summary, aes(x = treatment, y = mean_richness, fill = treatment)) +
   geom_bar(stat = "identity", color = "black", width = 0.7) +
   geom_errorbar(aes(ymin = mean_richness - se_richness,
                     ymax = mean_richness + se_richness),
@@ -2717,7 +2770,7 @@ fish_den_summary$location <- factor(
   levels = c("fish_on", "fish_off"))
 
 ggplot(fish_den_summary, 
-       aes(x = treatment, y = mean_density, fill = location, )) +
+       aes(x = treatment, y = mean_density, fill = location )) +
   geom_bar(stat = "identity", color = "black", width = 0.7, position = position_dodge(width = 0.8)) +
   geom_errorbar(aes(ymin = mean_density - se_density,
                     ymax = mean_density + se_density),
@@ -2735,4 +2788,58 @@ ggplot(fish_den_summary,
 ```
 
 ```{r}
+library(glmmTMB)
+library(DHARMa)
 
+fish <- fish %>%
+  mutate(
+    treatment = factor(treatment),
+    location  = factor(location),
+    ARKEV_ID  = factor(ARKEV_ID),
+    date      = factor(date)   # use factor for random effect
+  )
+```
+
+```{r}
+m_nb <- glmmTMB(
+  fish_density ~ treatment * location +
+    (1 | ARKEV_ID) +
+    (1 | date),
+  family = nbinom2(link = "log"),
+  data = fish
+)
+summary(m_nb)
+```
+```{r}
+library(emmeans)
+
+emmeans(m_nb, pairwise ~ treatment * location, type = "response")
+```
+```{r}
+library(emmeans)
+library(ggplot2)
+
+# Estimated marginal means on response scale (not log)
+emm <- emmeans(m_nb, ~ treatment * location, type = "response")
+
+# Convert to data frame for ggplot
+emm_df <- as.data.frame(emm)
+str(emm_df)
+
+# Plot
+ggplot(emm_df,
+       aes(x = treatment, y = response,
+           color = location, group = location)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_line(position = position_dodge(width = 0.3), size = 1) +
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL),
+                width = 0.15,
+                position = position_dodge(width = 0.3)) +
+  labs(
+    y = "Predicted Fish Density",
+    x = "Treatment",
+    color = "Location",
+    title = "Treatment × Location Interaction (Negative Binomial GLMM)"
+  )  +
+  theme_bw(base_size = 14)
+```
