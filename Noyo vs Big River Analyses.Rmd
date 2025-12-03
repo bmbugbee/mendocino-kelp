@@ -1,0 +1,506 @@
+---
+title: "Noyo ARKEV Analyses"
+author: "Sabrina Grant"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+#Importing datasheet
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#installing packages
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr)
+library(vegan)
+library(stringr)
+library(ggplot2)
+library(ggrepel)
+```
+
+```{r}
+
+#importing datasheet 
+noyo_MASTER_25 = read_sheet('https://docs.google.com/spreadsheets/d/1VIxTXa0lOiFGJusN2U6S19L8hHowEY0KJ9EwEEjk_6g/edit?gid=0#gid=0')
+
+#creating the function that converts "NAs" to true NAs
+to_numeric <- function(x) {
+  map_dbl(x, ~ {
+    # empty list → NA
+    if (length(.x) == 0) return(NA_real_)
+    
+    # if it's character, convert "NA" → NA first
+    if (is.character(.x)) {
+      .x <- na_if(.x, "NA")
+    }
+    as.numeric(.x)
+  })
+}
+
+noyo_MASTER_cleaned <- noyo_MASTER_25 %>%
+# turn "NA" strings in character columns into real NA
+  mutate(across(where(is.character), ~ na_if(.x, "NA"))) %>%
+# list-columns that are truly numeric-ish
+  mutate(
+    count   = to_numeric(count),
+    percent = to_numeric(percent),
+    depth_ft = to_numeric(depth_ft),
+    temp_f   = to_numeric(temp_f)
+  ) %>%
+# handle size_cm specially
+  mutate(
+# keep the original category (<2cm, >2cm, numbers) as a character column "urchin_size_class"
+    urch_size_class = map_chr(size_cm, ~ {
+      if (length(.x) == 0) return(NA_character_)
+      as.character(.x)
+    }),
+# numeric version: fish lengths only; urchin categories → NA
+    size_cm = map_dbl(size_cm, ~ {
+      if (length(.x) == 0) return(NA_real_)
+      if (is.character(.x)) {
+# drop urchin categories from numeric column
+        if (.x %in% c("<2cm", ">2cm")) return(NA_real_)
+        .x <- na_if(.x, "NA")
+      }
+      as.numeric(.x)
+    })
+  ) %>%
+  mutate(Date = make_date(year, month, day))
+```
+
+#Benthic Community Composition
+##df
+```{r}
+noyo_benthic_data <- noyo_MASTER_cleaned %>%
+  filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
+  dplyr::select(Date, month, ARKEV_type, ARKEV_unit, data_type,
+                species_code, count, urch_size_class, substrate,
+                depth_ft, temp_f, visibility_m) %>%
+  mutate(density = count / pi)
+
+
+noyo_benthic_data_cleaned <- noyo_benthic_data %>%
+   mutate( species_code = case_when(
+      species_code == "STRPUR" & urch_size_class == "<2cm" ~ "STRPUR_<2cm",
+      species_code == "STRPUR" & urch_size_class == ">2cm" ~ "STRPUR_>2cm",
+      TRUE ~ species_code)) %>%
+  dplyr::select(-c(urch_size_class:visibility_m))
+
+#Cleaning up matrix (NO KELP/INVERT)
+
+
+noyo_balance <- noyo_benthic_data_cleaned %>%
+  filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
+  mutate(
+    count   = tidyr::replace_na(count, 0),
+    density = tidyr::replace_na(density, 0)
+  ) %>%
+  group_by(Date, month, ARKEV_type, ARKEV_unit, species_code) %>%  # 🔴 KEY STEP
+  summarise(
+    density = sum(density, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from  = species_code,
+    values_from = density,
+    values_fill = 0
+  ) %>%
+  # drop the pseudo-species columns, KEEP the rows
+  select(-any_of(c("NO_INVERTS", "NO_KELP"))) %>%
+  select(-c(21:24))
+
+
+anyNA(noyo_balance)
+```
+##ARKEV vs. Controls (per unit)
+```{r}
+#averaging density across arkev units 
+noyo_unit <- noyo_balance %>%
+    filter(month != 10) %>%
+  group_by(ARKEV_type, ARKEV_unit) %>%
+  summarise(
+    across(DERIMB:CRYSTE, mean, na.rm = TRUE),
+    .groups = "drop")
+
+#building meta and comm matrix
+meta_unit <- noyo_unit %>%
+  dplyr::select(ARKEV_type, ARKEV_unit)
+
+comm_unit <- noyo_unit %>%
+  dplyr::select(-ARKEV_type, -ARKEV_unit)
+
+#checking to see if there are any rows with no observations
+row_sums <- rowSums(comm_unit)
+non_empty <- row_sums > 0
+sum(row_sums == 0)
+
+#NMDS
+set.seed(123)
+nmds_noyo_unit <- metaMDS(comm_unit, distance = "bray", k = 2)
+
+#PERMANOVA
+adonis2(nmds_noyo_unit ~ ARKEV_type, data = meta_unit, method = "bray")
+
+
+#plot NMDS
+site_scores <- as.data.frame(scores(nmds_noyo_unit, display = "sites")) %>%
+  bind_cols(meta_unit)
+
+
+ggplot() +
+  geom_point(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    size = 3.5, alpha = 0.85
+  ) +
+  stat_ellipse(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = ARKEV_type),
+    type = "t",
+    linetype = "solid",
+    size = 0.8,
+    alpha = 0.15,
+    show.legend = FALSE
+  ) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Treatment"
+  ) +
+  scale_color_manual(values = c("ARKEV" = "blue", "ARKEV_control" = "red")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = NA),
+    legend.key.size = unit(0.8, "cm"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12)
+  )
+
+```
+#Big River Vs. Noyo
+```{r}
+#importing datasheet 
+all_sites = read_sheet('https://docs.google.com/spreadsheets/d/1i3KlFK9ZlCHW7vNudpcN0kkriUDP4IahfxkR6CVGroQ/edit?gid=0#gid=0
+')
+
+#creating the function that converts "NAs" to true NAs
+to_numeric <- function(x) {
+  map_dbl(x, ~ {
+    # empty list → NA
+    if (length(.x) == 0) return(NA_real_)
+    
+    # if it's character, convert "NA" → NA first
+    if (is.character(.x)) {
+      .x <- na_if(.x, "NA")
+    }
+    as.numeric(.x)
+  })
+}
+
+all_sites_cleaned <- all_sites %>%
+# turn "NA" strings in character columns into real NA
+  mutate(across(where(is.character), ~ na_if(.x, "NA"))) %>%
+# list-columns that are truly numeric-ish
+  mutate(
+    count   = to_numeric(count),
+    percent = to_numeric(percent),
+    depth_ft = to_numeric(depth_ft),
+    temp_f   = to_numeric(temp_f)
+  ) %>%
+# handle size_cm specially
+  mutate(
+# keep the original category (<2cm, >2cm, numbers) as a character column "urchin_size_class"
+    urch_size_class = map_chr(size_cm, ~ {
+      if (length(.x) == 0) return(NA_character_)
+      as.character(.x)
+    }),
+# numeric version: fish lengths only; urchin categories → NA
+    size_cm = map_dbl(size_cm, ~ {
+      if (length(.x) == 0) return(NA_real_)
+      if (is.character(.x)) {
+# drop urchin categories from numeric column
+        if (.x %in% c("<2cm", ">2cm")) return(NA_real_)
+        .x <- na_if(.x, "NA")
+      }
+      as.numeric(.x)
+    })
+  ) %>%
+  mutate(Date = make_date(year, month, day))
+```
+
+#Benthic Community Composition
+##df
+```{r}
+all_sites_benthic_data <- all_sites_cleaned %>%
+  filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
+  dplyr::select(site,Date, month, ARKEV_type, ARKEV_unit, data_type,
+                species_code, count, urch_size_class, substrate,
+                depth_ft, temp_f, visibility_m) %>%
+  mutate(density = count / pi)
+
+
+all_sites_benthic_data_cleaned <- all_sites_benthic_data %>%
+   mutate( species_code = case_when(
+      species_code == "STRPUR" & urch_size_class == "<2cm" ~ "STRPUR_<2cm",
+      species_code == "STRPUR" & urch_size_class == ">2cm" ~ "STRPUR_>2cm",
+      TRUE ~ species_code)) %>%
+  dplyr::select(-c(urch_size_class:visibility_m))
+
+#Cleaning up matrix (NO KELP/INVERT)
+all_balance <- all_sites_benthic_data_cleaned %>%
+  filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
+  mutate(
+    count   = tidyr::replace_na(count, 0),
+    density = tidyr::replace_na(density, 0)
+  ) %>%
+  group_by(site,Date, month, ARKEV_type, ARKEV_unit, species_code) %>%  # 🔴 KEY STEP
+  summarise(
+    density = sum(density, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from  = species_code,
+    values_from = density,
+    values_fill = 0
+  ) %>%
+  # drop the pseudo-species columns, KEEP the rows
+  select(-any_of(c("NO_INVERTS", "NO_KELP")))
+
+anyNA(all_balance)
+```
+##Noyo vs. Big River (per unit)
+```{r}
+#averaging density across arkev units 
+all_unit <- all_balance %>%
+    filter(month != 10) %>%
+  filter(ARKEV_type == "ARKEV") %>% #just comparing the arkev units at both sites since noyo does not have controls
+  group_by(site, ARKEV_unit) %>%
+  summarise(
+    across(MESFRA:KELKEL, mean, na.rm = TRUE),
+    .groups = "drop")
+
+#building meta and comm matrix
+meta_unit <- all_unit %>%
+  dplyr::select(site, ARKEV_unit)
+
+comm_unit <- all_unit %>%
+  dplyr::select(-site, -ARKEV_unit)
+
+#checking to see if there are any rows with no observations
+row_sums <- rowSums(comm_unit)
+non_empty <- row_sums > 0
+sum(row_sums == 0)
+
+#NMDS
+set.seed(123)
+nmds_all_unit <- metaMDS(comm_unit, distance = "bray", k = 2)
+
+str(nmds_all_unit)
+head(nmds_all_unit)
+sapply(nmds_all_unit, class)
+
+
+#PERMANOVA
+adonis2(comm_unit ~ site, data = meta_unit, method = "bray")
+
+
+#plot NMDS
+site_scores <- as.data.frame(scores(nmds_all_unit, display = "sites")) %>%
+  bind_cols(meta_unit)
+
+
+ggplot() +
+  geom_point(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = site),
+    size = 3.5, alpha = 0.85
+  ) +
+  stat_ellipse(
+    data = site_scores,
+    aes(x = NMDS1, y = NMDS2, color = site),
+    type = "t",
+    linetype = "solid",
+    size = 0.8,
+    alpha = 0.15,
+    show.legend = FALSE
+  ) +
+  theme_bw(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Treatment"
+  ) +
+  scale_color_manual(values = c("Noyo" = "lightblue", "Big_River" = "salmon")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = NA),
+    legend.key.size = unit(0.8, "cm"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12)
+  )
+
+```
+###adding species vectors with envfit model
+```{r}
+#getting species vectors 
+species_fit <- envfit(nmds_all_unit, comm_unit, permutations = 999)
+
+scores_sites <- as.data.frame(scores(nmds_all_unit, display = "sites"))
+scores_sites <- cbind(scores_sites, meta_unit)
+
+scores_species <- as.data.frame(scores(species_fit, display = "vectors"))
+scores_species$species <- rownames(scores_species)
+scores_species$pval <- species_fit$vectors$pvals
+
+sig_species <- scores_species %>%
+  dplyr::arrange(pval) %>%
+  dplyr::slice(1:10)
+
+ggplot(scores_sites, aes(x = NMDS1, y = NMDS2, color = site)) +
+  geom_point(size = 3) +
+  stat_ellipse(aes(group = site), level = 0.95) +
+geom_segment(
+    data = sig_species,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+    arrow = arrow(length = unit(0.2, "cm")),
+    color = "black"
+  ) +
+  geom_text_repel(
+    data = sig_species,
+    inherit.aes = FALSE,
+    aes(x = NMDS1, y = NMDS2, label = species),
+    size = 4,
+    color = "black", 
+    fontface = "bold"
+  ) +
+  theme_bw(base_size = 14) +
+  labs(
+    x = "NMDS1",
+    y = "NMDS2",
+    color = "Treatment"
+  ) +
+  scale_color_manual(values = c("Noyo" = "lightblue", "Big_River" = "salmon")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = NA),
+    legend.key.size = unit(0.8, "cm"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12)
+  )
+```
+###trying an indicator species analysis
+```{r}
+install.packages("labdsv")
+library(labdsv)
+
+sp_sums <- colSums(comm_unit, na.rm = TRUE)
+sp_sums[sp_sums == 0]          # species with zero total abundance
+length(sp_sums[sp_sums == 0]) # how many of them
+comm_unit_filt <- comm_unit[, sp_sums > 0, drop = FALSE]
+
+
+#indicator species analysis
+indval_res <- indval(comm_unit_filt, meta_unit$site)
+
+#results
+summary(indval_res)
+
+#in a table
+indval_table <- data.frame(
+  species = rownames(indval_res$indval),
+  indval  = indval_res$indval,
+  pval    = indval_res$pval,
+  group   = indval_res$maxcls
+)
+indval_table
+
+meta_unit$site <- factor(meta_unit$site)
+levels(meta_unit$site)
+# [1] "Big_River" [2] "Noyo"   (for example)
+
+library(dplyr)
+group_labels <- gsub("^indval\\.", "", names(indval_table)[grepl("^indval\\.", names(indval_table))])
+
+indval_tidy <- indval_table %>%
+  mutate(
+    group_name = group_labels[group],
+    indval = if_else(
+      group_name == group_labels[1],
+      indval.Big_River,
+      indval.Noyo))
+
+sig_species <- indval_tidy %>%
+  filter(pval < 0.05) %>%
+  arrange(desc(indval))
+
+sig_species
+
+sig_species %>%
+  arrange(desc(indval)) %>%
+  ggplot(aes(x = reorder(species, indval), y = indval, fill = group_name)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    x = "Species",
+    y = "Indicator Value (IndVal)",
+    fill = "Site",
+    title = "Significant Indicator Species by Site"
+  ) +
+  scale_fill_manual(values = c("Noyo" = "lightblue", "Big_River" = "salmon")) +
+  theme_classic(base_size = 13)
+```
+
+```{r}
+
+sig_species %>%
+  mutate(
+    pval_cat = cut(
+      pval,
+      breaks = c(0, 0.001, 0.01, 0.05, 1),
+      labels = c("<0.001", "<0.01", "<0.05", ">0.05")
+    )
+  ) %>%
+  ggplot(aes(x = indval, y = reorder(species, indval))) +
+  geom_point(
+    aes(size = indval, color = pval),
+    alpha = 0.8
+  ) +
+  facet_wrap(~group_name, scales = "free_x") +
+  scale_color_viridis_c(
+    option = "plasma",
+    direction = 1,
+    name = "p-value"
+  ) +
+  scale_size_continuous(range = c(2, 8)) +
+  labs(
+    x = "Indicator Value (IndVal)",
+    y = "Species",
+    title = "Indicator Species by Site",
+    subtitle = "Dot color = significance (p-value); dot size = indicator strength"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    strip.background = element_rect(fill = "gray90"),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
