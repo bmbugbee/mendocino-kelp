@@ -1,0 +1,129 @@
+---
+title: "kelp_on_arkev_2026"
+output: html_document
+date: "2026-05-08"
+---
+
+```{r}
+#installing packages
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr)
+```
+
+```{r}
+#load kelp on arkev data
+koa_master = read_sheet("https://docs.google.com/spreadsheets/d/1Xk0a_PX9X-BuZQ9ZkRx0DFtRe8qcjAYHlaMz7DiH1ws/edit?gid=0#gid=0")
+```
+
+#noyo kelp on arkev
+```{r}
+koa_noyo <- koa_master |>
+  mutate(
+    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  ) |>
+  distinct(date, ARKEV_unit, .keep_all = TRUE) |>
+  mutate(plot = str_extract(ARKEV_unit, "\\d+")) |>
+  mutate(plot = fct_relevel(ARKEV_type,
+                            "PVC",
+                            "WOOD"
+                            )) |>
+    group_by(date) |>
+  mutate(total = sum(kelp_on_ARKEV)) |>
+  group_by(date, ARKEV_type) |>
+  mutate(total_type = sum(kelp_on_ARKEV)) |>
+  group_by(date, ARKEV_type) |>
+  mutate(mean = mean(kelp_on_ARKEV),
+         se = sd(kelp_on_ARKEV)/sqrt(length(kelp_on_ARKEV))) 
+
+```
+
+
+```{r}
+ggplot(koa_noyo, aes(x= date, y= kelp_on_ARKEV, color = ARKEV_type, group = ARKEV_unit)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  labs(
+    title = "Number of Spliced Sporophytes per ARKEV",
+    x = "Month",
+    y = "Total # Spliced Individuals"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+
+```
+
+
+```{r}
+ggplot(koa_noyo, aes(x= date, y= total_type, color = ARKEV_type)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  labs(
+    title = "Number of Spliced Sporophytes by ARKEV",
+    x = "Month",
+    y = "Total # Spliced Individuals"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+
+
+```{r}
+ggplot(koa_noyo, aes(x= date, y= mean, color = ARKEV_type)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, size=0.5) +
+  labs(
+    title = "Number of Spliced Sporophytes by ARKEV",
+    x = "Month",
+    y = "Total # Spliced Individuals"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+
+```
+
+```{r}
+stipe_noyo = koa_master %>%
+    mutate(
+    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  ) |>
+  filter(!is.na(stipe_length)) |>
+  group_by(date) |>
+  mutate(avg_length = mean(stipe_length),
+            se = sd(stipe_length)/sqrt(length(stipe_length)),
+         max = max(stipe_length)) |>
+group_by(date, ARKEV_type) |>
+  mutate(avg_length_type = mean(stipe_length),
+            se_type = sd(stipe_length)/sqrt(length(stipe_length)),
+         max_type = max(stipe_length))
+```
