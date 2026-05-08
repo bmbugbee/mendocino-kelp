@@ -10,7 +10,7 @@ library(dplyr)
 library(tidyr)
 library(lubridate)
 library(googlesheets4)
-library(purrr)
+library(purrr) 
 ```
 
 ```{r}
