@@ -1,0 +1,563 @@
+---
+title: "2026_spring_recruitment_analyses"
+author: "Sabrina Grant"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#installing packages
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr)
+library(vegan)
+library(stringr)
+library(ggplot2)
+library(ggrepel)
+```
+
+```{r}
+#importing datasheet 
+big_river_spring_recruitment = read_sheet('https://docs.google.com/spreadsheets/d/10cycCffIPLnrWE9QSD1MXqvty4o4RwntHcomYzE3p6M/edit?gid=0#gid=0')
+
+
+```
+
+#APRIL
+```{r}
+
+big_river_april_recruitment <- big_river_spring_recruitment %>%
+  filter(month == "4")
+
+
+#changing count columns from factor to numeric
+big_river_april_recruitment$LAMR <- as.numeric(big_river_april_recruitment$LAMR)
+big_river_april_recruitment$NERJ <- as.numeric(big_river_april_recruitment$NERJ)
+big_river_april_recruitment$NERA <- as.numeric(big_river_april_recruitment$NERA)
+
+#getting totals (sums of both transects per plot)
+april_site_total <- big_river_april_recruitment %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE)) 
+
+##by plot
+april_plot_total <- big_river_april_recruitment %>%
+  dplyr::group_by(N_S,ARKEV,plot) %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE))
+
+##inshore vs. offshore
+april_by_side <- big_river_april_recruitment %>%
+  dplyr::group_by(N_S) %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop")
+
+
+##by quadrant
+april_quadrants <- big_river_april_recruitment %>%
+  dplyr::mutate(quadrant = dplyr::case_when(
+    plot >= 6 & N_S == "North" ~ "NE",
+    plot >= 6 & N_S == "South" ~ "SE",
+    plot <= 5 & N_S == "North" ~ "NW",
+    plot <= 5 & N_S == "South" ~ "SW")) %>%
+  dplyr::group_by(quadrant) %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop") %>%
+  dplyr::arrange(quadrant)
+
+##by treatment
+april_treatment <- big_river_april_recruitment %>%
+  dplyr::group_by(ARKEV) %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop")
+
+april_site_total
+april_by_side
+april_quadrants
+april_treatment
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# ── Summarize to plot x side level ──────────────────────────────────────────
+heatmap_df <- big_river_april_recruitment %>%
+  dplyr::group_by(plot, N_S) %>%
+  dplyr::summarise(
+    LAMR = sum(LAMR, na.rm = TRUE),
+    NERJ = sum(NERJ, na.rm = TRUE),
+    Total = sum(LAMR, NERJ, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ── Reshape to long format for faceting ─────────────────────────────────────
+heatmap_long <- tidyr::pivot_longer(
+  heatmap_df,
+  cols = c(LAMR, NERJ, Total),
+  names_to = "species",
+  values_to = "count")
+
+#both species
+ggplot(heatmap_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-04-19",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+#totals
+
+species_long <- heatmap_long %>%
+  filter(species != "Total")
+
+ggplot(species_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-04-19",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+#totals
+
+totals_long <- heatmap_long %>%
+  filter(species == "Total")
+
+
+ggplot(totals_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-04-19",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+```
+```{r}
+#base theme
+heatmap_theme <- function() {
+  theme_minimal(base_size = 13) +
+    theme(
+      strip.text    = element_text(face = "bold", size = 13),
+      panel.grid    = element_blank(),
+      axis.text     = element_text(color = "gray30"),
+      plot.title    = element_text(face = "bold"),
+      plot.subtitle = element_text(color = "gray50"))}
+
+#totals per transects
+heatmap_df <- big_river_april_recruitment %>%
+  dplyr::group_by(plot, N_S) %>%
+  dplyr::summarise(
+    LAMR  = sum(LAMR, na.rm = TRUE),
+    NERJ  = sum(NERJ, na.rm = TRUE),
+    Total = sum(LAMR, NERJ, na.rm = TRUE),
+    .groups = "drop")
+
+# ── Plot 1: LAMR summed ──────────────────────────────────────────────────────
+p1 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = LAMR)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "LAMR Counts by Plot",
+       subtitle = "Summed across all transect bins | 2026-04-19",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+# ── Plot 2: NERJ summed ──────────────────────────────────────────────────────
+p2 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = NERJ)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "NERJ Counts by Plot",
+       subtitle = "Summed across all transect bins | 2026-04-19",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+# ── Plot 3: Total (LAMR + NERJ) summed ──────────────────────────────────────
+p3 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = Total)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "Total Species Counts by Plot (LAMR + NERJ)",
+       subtitle = "Summed across all transect bins | 2026-04-19",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BY INDIVIDUAL BIN (adds transect_bin as a facet layer)
+# ══════════════════════════════════════════════════════════════════════════════
+
+heatmap_bin <- big_river_april_recruitment %>%
+  dplyr::mutate(
+    Total = LAMR + NERJ,
+    bin_label = paste0("Bin ", transect_bin)
+  )
+
+# ── Plot 4: LAMR by bin ──────────────────────────────────────────────────────
+p4 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = LAMR)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_grid(bin_label ~ N_S, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "LAMR Counts by Plot and Transect Bin",
+       subtitle = "Not summed — each bin shown separately | 2026-04-19",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+# ── Plot 5: NERJ by bin ──────────────────────────────────────────────────────
+p5 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = NERJ)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_grid(bin_label ~ N_S, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "NERJ Counts by Plot and Transect Bin",
+       subtitle = "Not summed — each bin shown separately | 2026-04-19",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+# ── Plot 6: Total by bin ─────────────────────────────────────────────────────
+p6 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = Total)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_grid(bin_label ~ N_S, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "Total Species Counts by Plot and Transect Bin (LAMR + NERJ)",
+       subtitle = "Not summed — each bin shown separately | 2026-04-19",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+p1
+p2
+p3
+p4
+p5
+p6
+```
+
+#MAY
+
+```{r}
+big_river_may_recruitment <- big_river_spring_recruitment %>%
+  filter(month == "5")
+
+#changing count columns from factor to numeric
+big_river_may_recruitment$LAMR <- as.numeric(big_river_may_recruitment$LAMR)
+big_river_may_recruitment$NERJ <- as.numeric(big_river_may_recruitment$NERJ)
+big_river_may_recruitment$NERA <- as.numeric(big_river_may_recruitment$NERA)
+
+b
+#getting totals (sums of both transects per plot)
+may_site_total <- big_river_may_recruitment %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE)) 
+
+##by plot
+may_plot_total <- big_river_may_recruitment %>%
+  dplyr::group_by(N_S,ARKEV,plot) %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE))
+
+##inshore vs. offshore
+may_by_side <- big_river_may_recruitment %>%
+  dplyr::group_by(N_S) %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop")
+
+
+##by quadrant
+may_quadrants <- big_river_may_recruitment %>%
+  dplyr::mutate(quadrant = dplyr::case_when(
+    plot >= 6 & N_S == "North" ~ "NE",
+    plot >= 6 & N_S == "South" ~ "SE",
+    plot <= 5 & N_S == "North" ~ "NW",
+    plot <= 5 & N_S == "South" ~ "SW")) %>%
+  dplyr::group_by(quadrant) %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop") %>%
+  dplyr::arrange(quadrant)
+
+##by treatment
+may_treatment <- big_river_may_recruitment %>%
+  dplyr::group_by(ARKEV) %>%
+  dplyr::summarise(
+    Total_All  = sum(LAMR, NERJ, na.rm = TRUE),
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop")
+
+may_site_total
+may_by_side
+may_quadrants
+may_treatment
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# ── Summarize to plot x side level ──────────────────────────────────────────
+heatmap_df <- big_river_may_recruitment %>%
+  dplyr::group_by(plot, N_S) %>%
+  dplyr::summarise(
+    LAMR = sum(LAMR, na.rm = TRUE),
+    NERJ = sum(NERJ, na.rm = TRUE),
+    Total = sum(LAMR, NERJ, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ── Reshape to long format for faceting ─────────────────────────────────────
+heatmap_long <- tidyr::pivot_longer(
+  heatmap_df,
+  cols = c(LAMR, NERJ, Total),
+  names_to = "species",
+  values_to = "count")
+
+#both species
+ggplot(heatmap_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-05-05",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+#totals
+
+species_long <- heatmap_long %>%
+  filter(species != "Total")
+
+ggplot(species_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-05-05",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+#totals
+
+totals_long <- heatmap_long %>%
+  filter(species == "Total")
+
+
+ggplot(totals_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-05-05",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+```
+```{r}
+#base theme
+heatmap_theme <- function() {
+  theme_minimal(base_size = 13) +
+    theme(
+      strip.text    = element_text(face = "bold", size = 13),
+      panel.grid    = element_blank(),
+      axis.text     = element_text(color = "gray30"),
+      plot.title    = element_text(face = "bold"),
+      plot.subtitle = element_text(color = "gray50"))}
+
+#totals per transects
+heatmap_df <- big_river_april_recruitment %>%
+  dplyr::group_by(plot, N_S) %>%
+  dplyr::summarise(
+    LAMR  = sum(LAMR, na.rm = TRUE),
+    NERJ  = sum(NERJ, na.rm = TRUE),
+    Total = sum(LAMR, NERJ, na.rm = TRUE),
+    .groups = "drop")
+
+# ── Plot 1: LAMR summed ──────────────────────────────────────────────────────
+p1 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = LAMR)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "LAMR Counts by Plot",
+       subtitle = "Summed across all transect bins | 2026-05-05",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+# ── Plot 2: NERJ summed ──────────────────────────────────────────────────────
+p2 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = NERJ)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "NERJ Counts by Plot",
+       subtitle = "Summed across all transect bins | 2026-05-05",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+# ── Plot 3: Total (LAMR + NERJ) summed ──────────────────────────────────────
+p3 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = Total)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "Total Species Counts by Plot (LAMR + NERJ)",
+       subtitle = "Summed across all transect bins | 2026-05-05",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BY INDIVIDUAL BIN (adds transect_bin as a facet layer)
+# ══════════════════════════════════════════════════════════════════════════════
+
+heatmap_bin <- big_river_may_recruitment %>%
+  dplyr::mutate(
+    Total = LAMR + NERJ,
+    bin_label = paste0("Bin ", transect_bin)
+  )
+
+# ── Plot 4: LAMR by bin ──────────────────────────────────────────────────────
+p4 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = LAMR)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_grid(bin_label ~ N_S, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "LAMR Counts by Plot and Transect Bin",
+       subtitle = "Not summed — each bin shown separately | 2026-05-05",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+# ── Plot 5: NERJ by bin ──────────────────────────────────────────────────────
+p5 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = NERJ)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_grid(bin_label ~ N_S, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "NERJ Counts by Plot and Transect Bin",
+       subtitle = "Not summed — each bin shown separately | 2026-05-05",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+# ── Plot 6: Total by bin ─────────────────────────────────────────────────────
+p6 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = Total)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_grid(bin_label ~ N_S, scales = "free_y") +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(title = "Total Species Counts by Plot and Transect Bin (LAMR + NERJ)",
+       subtitle = "Not summed — each bin shown separately | 2026-05-05",
+       x = "Plot (West → East)", y = NULL) +
+  heatmap_theme()
+
+p1
+p2
+p3
+p4
+p5
+p6
+```
+
+
