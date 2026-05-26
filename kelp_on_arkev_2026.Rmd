@@ -16,10 +16,13 @@ library(purrr)
 ```{r}
 #load kelp on arkev data
 koa_master = read_sheet("https://docs.google.com/spreadsheets/d/1Xk0a_PX9X-BuZQ9ZkRx0DFtRe8qcjAYHlaMz7DiH1ws/edit?gid=0#gid=0")
+str(koa_master)
 ```
 
 #noyo kelp on arkev
 ```{r}
+library(stringr)
+library(forcats)
 koa_noyo <- koa_master |>
   mutate(
     date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
@@ -38,10 +41,13 @@ koa_noyo <- koa_master |>
   mutate(mean = mean(kelp_on_ARKEV),
          se = sd(kelp_on_ARKEV)/sqrt(length(kelp_on_ARKEV))) 
 
+
+
 ```
 
 
 ```{r}
+library(ggplot2)
 ggplot(koa_noyo, aes(x= date, y= kelp_on_ARKEV, color = ARKEV_type, group = ARKEV_unit)) +
   geom_point(size=2.5) +
   geom_line(size=1) +
