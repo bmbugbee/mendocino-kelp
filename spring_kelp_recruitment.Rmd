@@ -18,16 +18,175 @@ library(vegan)
 library(stringr)
 library(ggplot2)
 library(ggrepel)
+library(janitor)
+library(patchwork)
 ```
 
 ```{r}
 #importing datasheet 
 big_river_spring_recruitment = read_sheet('https://docs.google.com/spreadsheets/d/10cycCffIPLnrWE9QSD1MXqvty4o4RwntHcomYzE3p6M/edit?gid=0#gid=0')
 
-
+big_river_early_april_recruitment = read_sheet('https://docs.google.com/spreadsheets/d/1Zhjbl4z-xsj6EZJEwQ42Fs4pnPALJ4SW-X6S03eCDtY/edit?pli=1&gid=0#gid=0')
 ```
 
-#APRIL
+#APRIL 4th
+```{r}
+big_river_early_april_recruitment <-  big_river_early_april_recruitment%>%
+  filter(site == "Big River") %>%
+  clean_names()
+
+#changing count columns from factor to numeric
+big_river_early_april_recruitment$lamr <- as.numeric(big_river_early_april_recruitment$lamr)
+big_river_early_april_recruitment$nerj <- as.numeric(big_river_early_april_recruitment$nerj)
+big_river_early_april_recruitment$nera <- as.numeric(big_river_early_april_recruitment$nera)
+
+#getting totals (sums of both transects per plot)
+early_april_site_total <- big_river_early_april_recruitment %>%
+  dplyr::summarise(
+    Total_All  = sum(lamr, nerj, na.rm = TRUE),
+    Total_LAMR = sum(lamr, na.rm = TRUE),
+    Total_NERJ = sum(nerj, na.rm = TRUE)) 
+
+##by plot
+early_april_plot_total <- big_river_early_april_recruitment %>%
+  dplyr::group_by(n_s,arkev,plot) %>%
+  dplyr::summarise(
+    Total_All  = sum(lamr, nerj, na.rm = TRUE),
+    Total_LAMR = sum(lamr, na.rm = TRUE),
+    Total_NERJ = sum(nerj, na.rm = TRUE)) 
+
+##inshore vs. offshore
+early_april_by_side <- big_river_early_april_recruitment %>%
+  dplyr::group_by(n_s) %>%
+  dplyr::summarise(
+   Total_All  = sum(lamr, nerj, na.rm = TRUE),
+    Total_LAMR = sum(lamr, na.rm = TRUE),
+    Total_NERJ = sum(nerj, na.rm = TRUE)) 
+
+
+##by quadrant
+early_april_quadrants <- big_river_early_april_recruitment %>%
+  dplyr::mutate(quadrant = dplyr::case_when(
+    plot >= 6 & n_s == "N" ~ "NE",
+    plot >= 6 & n_s == "S" ~ "SE",
+    plot <= 5 & n_s == "N" ~ "NW",
+    plot <= 5 & n_s == "S" ~ "SW")) %>%
+  dplyr::group_by(quadrant) %>%
+  dplyr::summarise(
+    Total_All  = sum(lamr, nerj, na.rm = TRUE),
+    Total_LAMR = sum(lamr, na.rm = TRUE),
+    Total_NERJ = sum(nerj, na.rm = TRUE), 
+    .groups = "drop") %>%
+  dplyr::arrange(quadrant)
+
+##by treatment
+early_april_treatment <- big_river_early_april_recruitment %>%
+  dplyr::group_by(arkev) %>%
+  dplyr::summarise(
+    Total_All  = sum(lamr, nerj, na.rm = TRUE),
+    Total_LAMR = sum(lamr, na.rm = TRUE),
+    Total_NERJ = sum(nerj, na.rm = TRUE),
+    .groups = "drop")
+
+early_april_site_total
+early_april_by_side
+early_april_quadrants
+early_april_treatment
+```
+
+#April 4th Heatmaps
+```{r}
+#summarize to plot x side level
+heatmap_df_4_4 <- big_river_early_april_recruitment %>%
+  dplyr::group_by(plot, n_s) %>%
+  dplyr::summarise(
+    Total_All  = sum(lamr, nerj, na.rm = TRUE),
+    Total_LAMR = sum(lamr, na.rm = TRUE),
+    Total_NERJ = sum(nerj, na.rm = TRUE),
+    .groups = "drop")
+
+#reshape to long format for faceting
+heatmap_long_4_4 <- tidyr::pivot_longer(
+  heatmap_df_4_4,
+  cols = c(Total_LAMR, Total_NERJ, Total_All),
+  names_to = "species",
+  values_to = "count")
+
+#both species
+ggplot(heatmap_long_4_4, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ n_s, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transects | 2026-04-04",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+#totals by species
+species_long <- heatmap_long_4_4 %>%
+  filter(species != "Total")
+
+ggplot(species_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ n_s, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transects | 2026-04-04",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+#totals
+
+totals_long <- heatmap_long_4_4 %>%
+  filter(species == "Total_All")
+
+
+ggplot(totals_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = count), color = "gray20", size = 5) +
+  facet_wrap(~ n_s, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:10)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transects | 2026-04-04",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+```
+
+
+#APRIL 19th
 ```{r}
 
 big_river_april_recruitment <- big_river_spring_recruitment %>%
@@ -94,12 +253,9 @@ april_quadrants
 april_treatment
 ```
 
-
+#April 19th Heatmaps
 ```{r}
-library(dplyr)
-library(ggplot2)
-
-# ── Summarize to plot x side level ──────────────────────────────────────────
+#summarize to plot x side level
 heatmap_df <- big_river_april_recruitment %>%
   dplyr::group_by(plot, N_S) %>%
   dplyr::summarise(
@@ -109,7 +265,7 @@ heatmap_df <- big_river_april_recruitment %>%
     .groups = "drop"
   )
 
-# ── Reshape to long format for faceting ─────────────────────────────────────
+#reshape to long format for faceting
 heatmap_long <- tidyr::pivot_longer(
   heatmap_df,
   cols = c(LAMR, NERJ, Total),
@@ -209,7 +365,7 @@ heatmap_df <- big_river_april_recruitment %>%
     Total = sum(LAMR, NERJ, na.rm = TRUE),
     .groups = "drop")
 
-# ── Plot 1: LAMR summed ──────────────────────────────────────────────────────
+#plot 1: LAMR summed
 p1 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = LAMR)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
@@ -220,7 +376,7 @@ p1 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = LAMR)) +
        x = "Plot (West → East)", y = NULL) +
   heatmap_theme()
 
-# ── Plot 2: NERJ summed ──────────────────────────────────────────────────────
+#plot 2: NERJ summed
 p2 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = NERJ)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
@@ -231,7 +387,7 @@ p2 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = NERJ)) +
        x = "Plot (West → East)", y = NULL) +
   heatmap_theme()
 
-# ── Plot 3: Total (LAMR + NERJ) summed ──────────────────────────────────────
+#plot 3: Total (LAMR + NERJ) summed
 p3 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = Total)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
@@ -243,9 +399,9 @@ p3 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = Total)) +
   heatmap_theme()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+
 # BY INDIVIDUAL BIN (adds transect_bin as a facet layer)
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 heatmap_bin <- big_river_april_recruitment %>%
   dplyr::mutate(
@@ -253,7 +409,7 @@ heatmap_bin <- big_river_april_recruitment %>%
     bin_label = paste0("Bin ", transect_bin)
   )
 
-# ── Plot 4: LAMR by bin ──────────────────────────────────────────────────────
+#plot 4: LAMR by bin 
 p4 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = LAMR)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_grid(bin_label ~ N_S, scales = "free_y") +
@@ -264,7 +420,7 @@ p4 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = LAMR)) +
        x = "Plot (West → East)", y = NULL) +
   heatmap_theme()
 
-# ── Plot 5: NERJ by bin ──────────────────────────────────────────────────────
+#plot 5: NERJ by bin
 p5 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = NERJ)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_grid(bin_label ~ N_S, scales = "free_y") +
@@ -275,7 +431,7 @@ p5 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = NERJ)) +
        x = "Plot (West → East)", y = NULL) +
   heatmap_theme()
 
-# ── Plot 6: Total by bin ─────────────────────────────────────────────────────
+#plot 6: Total by bin
 p6 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = Total)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_grid(bin_label ~ N_S, scales = "free_y") +
@@ -305,7 +461,7 @@ big_river_may_recruitment$LAMR <- as.numeric(big_river_may_recruitment$LAMR)
 big_river_may_recruitment$NERJ <- as.numeric(big_river_may_recruitment$NERJ)
 big_river_may_recruitment$NERA <- as.numeric(big_river_may_recruitment$NERA)
 
-b
+
 #getting totals (sums of both transects per plot)
 may_site_total <- big_river_may_recruitment %>%
   dplyr::summarise(
@@ -365,7 +521,7 @@ may_treatment
 library(dplyr)
 library(ggplot2)
 
-# ── Summarize to plot x side level ──────────────────────────────────────────
+#summarize to plot x side level
 heatmap_df <- big_river_may_recruitment %>%
   dplyr::group_by(plot, N_S) %>%
   dplyr::summarise(
@@ -375,7 +531,7 @@ heatmap_df <- big_river_may_recruitment %>%
     .groups = "drop"
   )
 
-# ── Reshape to long format for faceting ─────────────────────────────────────
+#reshape to long format for faceting
 heatmap_long <- tidyr::pivot_longer(
   heatmap_df,
   cols = c(LAMR, NERJ, Total),
@@ -475,7 +631,7 @@ heatmap_df <- big_river_april_recruitment %>%
     Total = sum(LAMR, NERJ, na.rm = TRUE),
     .groups = "drop")
 
-# ── Plot 1: LAMR summed ──────────────────────────────────────────────────────
+#plot 1: LAMR summed
 p1 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = LAMR)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
@@ -486,7 +642,7 @@ p1 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = LAMR)) +
        x = "Plot (West → East)", y = NULL) +
   heatmap_theme()
 
-# ── Plot 2: NERJ summed ──────────────────────────────────────────────────────
+#plot 2: NERJ summed 
 p2 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = NERJ)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
@@ -497,7 +653,7 @@ p2 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = NERJ)) +
        x = "Plot (West → East)", y = NULL) +
   heatmap_theme()
 
-# ── Plot 3: Total (LAMR + NERJ) summed ──────────────────────────────────────
+#plot 3: Total (LAMR + NERJ) summed
 p3 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = Total)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_wrap(~ N_S, ncol = 1, scales = "free_y") +
@@ -509,9 +665,9 @@ p3 <- ggplot(heatmap_df, aes(x = factor(plot), y = N_S, fill = Total)) +
   heatmap_theme()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+
 # BY INDIVIDUAL BIN (adds transect_bin as a facet layer)
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 heatmap_bin <- big_river_may_recruitment %>%
   dplyr::mutate(
@@ -519,7 +675,7 @@ heatmap_bin <- big_river_may_recruitment %>%
     bin_label = paste0("Bin ", transect_bin)
   )
 
-# ── Plot 4: LAMR by bin ──────────────────────────────────────────────────────
+#plot 4: LAMR by bin
 p4 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = LAMR)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_grid(bin_label ~ N_S, scales = "free_y") +
@@ -530,7 +686,7 @@ p4 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = LAMR)) +
        x = "Plot (West → East)", y = NULL) +
   heatmap_theme()
 
-# ── Plot 5: NERJ by bin ──────────────────────────────────────────────────────
+#plot 5: NERJ by bin
 p5 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = NERJ)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_grid(bin_label ~ N_S, scales = "free_y") +
@@ -541,7 +697,7 @@ p5 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = NERJ)) +
        x = "Plot (West → East)", y = NULL) +
   heatmap_theme()
 
-# ── Plot 6: Total by bin ─────────────────────────────────────────────────────
+#plot 6: Total by bin
 p6 <- ggplot(heatmap_bin, aes(x = factor(plot), y = N_S, fill = Total)) +
   geom_tile(color = "white", linewidth = 0.8) +
   facet_grid(bin_label ~ N_S, scales = "free_y") +
@@ -560,7 +716,547 @@ p5
 p6
 ```
 #Figures for Ben
+##heatmap visualizations for total counts 
 ```{r}
+#convert to long format
+all_long <- bind_rows(
+  early_april_quadrants %>% mutate(date = "Early April"),
+  april_quadrants %>% mutate(date = "Late April"),
+  may_quadrants %>% mutate(date = "May")
+) %>%
+  mutate(date = factor(date, levels = c("Early April", "Late April", "May"))) %>%
+  pivot_longer(cols = c(Total_All, Total_LAMR, Total_NERJ),
+               names_to = "species",
+               values_to = "count") %>%
+  mutate(species = recode(species,
+    "Total_All"  = "All Recruits",
+    "Total_LAMR" = "Laminariales spp.",
+    "Total_NERJ" = "Nereocystis juveniles"
+  )) %>%
+  mutate(
+    x_pos = factor(ifelse(grepl("E", quadrant), "E", "W"), levels = c("W", "E")),
+    y_pos = factor(ifelse(grepl("N", quadrant), "N", "S"), levels = c("N", "S"))
+  )
+
+
+#figure 1: All Recruits
+fig1_data <- all_long %>%
+  filter(species == "All Recruits")
+
+fig1 <- ggplot(fig1_data, aes(x = x_pos, y = y_pos, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = count), color = "gray20", size = 5) +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_y_discrete(limits = rev) +
+  labs(
+    title = "Big River Restoration Site: Total Recruitment by Quadrant",
+    subtitle = "All species | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  )
+
+#Figure 2: Nereocystis juveniles only 
+fig2_data <- all_long %>%
+  filter(species == "Nereocystis juveniles")
+
+fig2 <- ggplot(fig2_data, aes(x = x_pos, y = y_pos, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = count), color = "gray20", size = 5) +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+   scale_y_discrete(limits = rev) +
+  labs(
+    title = "Big River Restoration Site: NERJ Counts by Quadrant",
+    subtitle = "Nereocystis juveniles | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  )
+
+#Figure 3: NERJ and LAMR side by side 
+fig3_data <- all_long %>%
+filter(species %in% c("Nereocystis juveniles", "Laminariales spp.")) %>%
+  mutate(species = recode(species,
+    "Laminariales spp." = "LAMR",
+    "Nereocystis juveniles" = "NERJ"),
+  species = factor(species, levels = c("LAMR", "NERJ")))
+
+fig3 <- ggplot(fig3_data, aes(x = x_pos, y = y_pos, fill = count)) +
+geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = count), color = "gray20", size = 4) +
+  facet_grid(species ~ date) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_y_discrete(limits = rev) +
+  labs(
+    title = "Big River Restoration Site: LAMR & NERJ Counts by Quadrant",
+    subtitle = "Laminariales spp. recruits & Nereocystis juveniles | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  )
+
+
+
+
+fig1
+fig2
+fig3
+```
+##total counts bar graphs for arkevs vs controls 
+```{r}
+#standardize early april
+early_april_std <- big_river_early_april_recruitment %>%
+  rename(N_S = n_s, ARKEV = arkev, LAMR = lamr, NERJ = nerj) %>%
+  mutate(date = "Early April") %>%
+  group_by(date, site, plot, N_S, ARKEV, meter) %>%
+  summarise(
+    LAMR = sum(LAMR, na.rm = TRUE),
+    NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rename(transect = meter)
+
+#standardize late april and may
+april_std <- big_river_april_recruitment %>%
+  mutate(date = "Late April") %>%
+  group_by(date, site, plot, N_S, ARKEV, transect_bin) %>%
+  summarise(
+    LAMR = sum(LAMR, na.rm = TRUE),
+    NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rename(transect = transect_bin)
+
+may_std <- big_river_may_recruitment %>%
+  mutate(date = "May") %>%
+  group_by(date, site, plot, N_S, ARKEV, transect_bin) %>%
+  summarise(
+    LAMR = sum(LAMR, na.rm = TRUE),
+    NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rename(transect = transect_bin)
+
+#combine
+all_raw <- bind_rows(early_april_std, april_std, may_std) %>%
+  mutate(
+    ARKEV = recode(ARKEV, "NO ARKEV" = "Control"),
+    date = factor(date, levels = c("Early April", "Late April", "May")),
+    Total_All = LAMR + NERJ
+  )
+
+#summarize to total counts 
+treatment_totals <- all_raw %>%
+  pivot_longer(cols = c(Total_All, LAMR, NERJ),
+               names_to = "species",
+               values_to = "count") %>%
+  group_by(date, ARKEV, species) %>%
+  summarise(
+    total = sum(count, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(species = recode(species, "Total_All" = "All Recruits"))
+
+#figure 1: All Recruits
+t_fig1 <- treatment_totals %>%
+  filter(species == "All Recruits") %>%
+  ggplot(aes(x = ARKEV, y = total, fill = ARKEV)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.8, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "Control" = "#a8c8a0")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Total Recruitment | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Total Count",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  )+ 
+  scale_y_continuous(expand = c(0, 0))
+
+t_fig1
+
+#figure 2: NERJ only 
+t_fig2 <- treatment_totals %>%
+  filter(species == "NERJ") %>%
+  ggplot(aes(x = ARKEV, y = total, fill = ARKEV)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.6, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "Control" = "#a8c8a0")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Nereocystis juveniles | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Total Count",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  )+ 
+  scale_y_continuous(expand = c(0, 0))
+
+t_fig2
+
+#figure 3: LAMR and NERJ side by side
+t_fig3 <- treatment_totals %>%
+  filter(species %in% c("LAMR", "NERJ")) %>%
+  mutate(species = factor(species, levels = c("LAMR", "NERJ"))) %>%
+  ggplot(aes(x = ARKEV, y = total, fill = species)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.6, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("LAMR" = "brown4", "NERJ" = "green4")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Laminariales spp. recruits & Nereocystis juveniles | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Total Count",
+    fill = "Species"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  ) + 
+  scale_y_continuous(expand = c(0, 0))
+
+t_fig3
+```
+
+##density bar graphs for arkevs vs controls 
+```{r}
+#density
+all_density <- all_raw %>%
+  mutate(
+    LAMR_density = LAMR / 60,
+    NERJ_density = NERJ / 60,
+    Total_density = Total_All / 60)
+
+treatment_density <- all_density %>%
+  group_by(date, ARKEV, plot, N_S) %>%
+  summarise(
+    LAMR_density = sum(LAMR_density, na.rm = TRUE),
+    NERJ_density = sum(NERJ_density, na.rm = TRUE),
+    Total_density = sum(Total_density, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = c(Total_density, LAMR_density, NERJ_density),
+               names_to = "species",
+               values_to = "density") %>%
+  group_by(date, ARKEV, species) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(species = recode(species,
+    "Total_density" = "All Recruits",
+    "LAMR_density"  = "LAMR",
+    "NERJ_density"  = "NERJ"
+  ))
+
+#figure 1: All Recruits Density
+d_fig1 <- treatment_density %>%
+  filter(species == "All Recruits") %>%
+  ggplot(aes(x = ARKEV, y = mean_density, fill = ARKEV)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.8, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "Control" = "#a8c8a0")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Mean Density of all Recruitment Across Plots | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Mean Density (recruits/m²)",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+d_fig1
+
+#figure 2: NERJ Density
+d_fig2 <- treatment_density %>%
+  filter(species == "NERJ") %>%
+  ggplot(aes(x = ARKEV, y = mean_density, fill = ARKEV)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.8, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "Control" = "#a8c8a0")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Mean Density of Nereo Juveniles Across Plots | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Mean Density (recruits/m²)",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+d_fig2
+
+#figure 3: LAMR and NERJ Density side by side 
+d_fig3 <- treatment_density %>%
+  filter(species %in% c("LAMR", "NERJ")) %>%
+  mutate(species = factor(species, levels = c("LAMR", "NERJ"))) %>%
+  ggplot(aes(x = ARKEV, y = mean_density, fill = species)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.6, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("LAMR" = "brown4", "NERJ" = "green4")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Mean Density of Laminariales spp. recruits & Nereo Juveniles Across Plots | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Mean Density (recruits/m²)",
+    fill = "Species"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+d_fig3
+```
+
+#2025 vs 2026 kelp recruitment
+```{r}
+arkev_data_2025 <- read_sheet('https://docs.google.com/spreadsheets/d/1jhqeuVwg7_icGaYOh5YpMcoPubQsDs3fn9fWGcZmFi4/edit?gid=1766421584#gid=1766421584')
+
+arkev_data_2025 <- arkev_data_2025 %>%
+  mutate(
+    count   = as.numeric(unlist(count)))
+
+#selecting for kelp data and early spring months
+arkev_kelp_2025 <- arkev_data_2025 %>%
+  dplyr::select(month, day, year, ARKEV_type, ARKEV_unit, data_type, species_code,count) %>%
+  filter(month == c("4", "5")) %>%
+  mutate(date = as.Date(paste(year, month, day, sep = "-"))) %>%
+  dplyr::select(date, ARKEV_type, ARKEV_unit, data_type, species_code, count) %>%
+  filter(data_type == "kelp") 
+
+#cleaning up 
+# Fill in missing combos of ARKEV_type × Date × species_code
+  kelp_25_clean <- arkev_kelp_2025 %>%
+   # complete(date, ARKEV_type, ARKEV_unit, data_type,species_code, fill = list(count = 0)) %>%
+    dplyr::select(date,ARKEV_type, ARKEV_unit, species_code, count) %>%
+  filter(species_code %in% c("LAMR", "NERJ", "NO_KELP"))
+
+
+#2025: sum circles per plot, calculate density
+density_2025 <- kelp_25_clean %>%
+  filter(species_code %in% c("LAMR", "NERJ")) %>%
+  mutate(plot = as.numeric(gsub("[A-Za-z]", "", ARKEV_unit))) %>%
+  mutate(date = case_when(
+    date == as.Date("2025-04-24") ~ "Late April",
+    date == as.Date("2025-05-08") ~ "Early May",
+    date == as.Date("2025-05-25") ~ "Late May"
+  )) %>%
+  group_by(date, ARKEV_type, plot, species_code) %>%
+  summarise(count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    density = count / (2 * pi),
+    year = 2025
+  ) %>%
+  rename(ARKEV = ARKEV_type, species = species_code)
+
+#2026: density per plot
+density_2026 <- all_raw %>%
+  pivot_longer(cols = c(LAMR, NERJ),
+               names_to = "species",
+               values_to = "count") %>%
+  group_by(date, ARKEV, plot, species) %>%
+  summarise(count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    density = count / 120,
+    year = 2026)
+
+#Combine
+density_combined <- bind_rows(density_2025, density_2026) %>%
+mutate(
+    year = factor(year),
+    ARKEV = recode(ARKEV, "NO ARKEV" = "Control"),
+    date = factor(date, levels = c("Early April", "Late April", "May", "Early May", "Late May")),
+    ARKEV = recode(ARKEV, "NO ARKEV" = "Control"))
+```
+
+```{r}
+#2025 density
+#average density to  treatment totals 
+treatment_totals_2025 <- density_2025 %>%
+  mutate(ARKEV = recode(ARKEV, "ARKEV_control" = "Control")) %>%
+  group_by(date, ARKEV, species) %>%
+  summarise(mean_density = mean(density, na.rm = TRUE), .groups = "drop") %>%
+  mutate(date = factor(date, levels = c("Late April", "Early May", "Late May")))
+
+#Figure 1: All Recruits
+fig1_2025 <- treatment_totals_2025 %>%
+  group_by(date, ARKEV) %>%
+  summarise(total_density = sum(mean_density), .groups = "drop") %>%
+  ggplot(aes(x = ARKEV, y = total_density, fill = ARKEV)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.8, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "Control" = "#a8c8a0")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Mean Density of all Recruitment Across Plots | 04/24/2025, 05/08/2025, 05/25/2025",
+    x = NULL,
+    y = "Mean Density (recruits/m²)",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+fig1_2025
+
+#Figure 2: NERJ only
+fig2_2025 <- treatment_totals_2025 %>%
+  filter(species == "NERJ") %>%
+  ggplot(aes(x = ARKEV, y = mean_density, fill = ARKEV)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.6, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "Control" = "#a8c8a0")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Mean Density of Nereo Juveniles Across Plots | 04/24/2025, 05/08/2025, 05/25/2025",
+    x = NULL,
+    y = "Mean Density (recruits/m²)",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+fig2_2025
+
+#Figure 3: LAMR and NERJ side by side
+fig3_2025 <- treatment_totals_2025 %>%
+  filter(species %in% c("LAMR", "NERJ")) %>%
+  mutate(species = factor(species, levels = c("LAMR", "NERJ"))) %>%
+  ggplot(aes(x = ARKEV, y = mean_density, fill = species)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.6, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("LAMR" = "brown4", "NERJ" = "green4")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Mean Density of Laminariales spp. recruits & Nereo Juveniles Across Plots | 04/24/2025, 05/08/2025, 05/25/2025",
+    x = NULL,
+    y = "Mean Density (recruits/m²)",
+    fill = "Species"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+fig3_2025
+```
+#downloading figs
+```{r}
+fig1_2025 | d_fig1
+
+ggsave("heatmap_total.png", plot = fig1, width = 10, height = 5, dpi = 300)
+
+ggsave("heatmap_nereo.png", plot = fig2, width = 10, height = 5, dpi = 300)
+
+ggsave("heatmap_lam_nereo.png", plot = fig3, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_totalcount.png", plot = t_fig1, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_nereocount.png", plot = t_fig2, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_lamnereocount.png", plot = t_fig3, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_totaldensity.png", plot = d_fig1, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_nereodensity.png", plot = d_fig2, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_lamnereodensity.png", plot = d_fig3, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_totaldensity25.png", plot = fig1_2025, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_nereodensity25.png", plot = fig2_2025, width = 10, height = 5, dpi = 300)
+
+ggsave("bar_lamnereodensity25.png", plot = fig3_2025, width = 10, height = 5, dpi = 300)
 
 ```
 
