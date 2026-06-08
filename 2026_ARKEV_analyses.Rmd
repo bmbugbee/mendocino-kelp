@@ -1,0 +1,901 @@
+---
+title: "2026_ARKEV_analyses"
+author: "Sabrina Grant"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+librarian::shelf(tidyverse, ggplot2, googlesheets4, janitor)
+
+#importing google sheets 
+arkev_sheet_url = "https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=962568602#gid=962568602"
+
+#selecting just the kelp/invert df 
+arkev_kelp_invert_data <- read_sheet(arkev_sheet_url, sheet = "arkev_kelp_invert_data")
+```
+
+```{r}
+#DF BUILDING
+
+##cleaning up the df names
+build_1 <- arkev_kelp_invert_data %>%
+  clean_names() %>%
+  rename(purple_urchins_small = purple_urchins_2cm, 
+         purple_urchins_large = purple_urchins_2cm_2)
+
+##removing columns i dont want
+build_2 <- build_1 %>%
+  dplyr::select(-c(observer:notes)) %>%
+  dplyr::select(-depth_ft)
+
+##converting columns to factors and numeric
+build_3 <- build_2 %>%
+  mutate(
+    across(c(year, month, day, site, arkev_unit, arkev_type), as.factor),
+    across(c(purple_urchins_small:pychel), as.numeric),
+    date = as.Date(date))
+
+#DENSITY
+
+##converting total counts to density
+build_4 <- build_3 %>%
+  mutate(across(purple_urchins_small:pychel, 
+                ~ . / pi))
+
+
+##pivoting to long format
+build_5 <- build_4 %>%
+  pivot_longer(
+    purple_urchins_small:pychel,
+    names_to = "species",
+    values_to = "density")
+
+##getting mean, sd, se 
+build_6 <- build_5 %>%
+  group_by(site, date, arkev_type, species) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    se_density = sd(density, na.rm = TRUE) /
+      sqrt(sum(!is.na(density))),
+    .groups = "drop")
+
+#GRAZERS
+
+##filtering for grazers
+grazer_1 <- build_6 %>%
+  group_by(site, date, arkev_type, species) %>%
+  filter(species %in% c("purple_urchins_small", "purple_urchins_large", "red_urchins", "tegula"))
+
+##filtering for big river 
+grazer_2 <- grazer_1 %>%
+  filter(site == "big_river") 
+
+##filtering for noyo 
+grazer_3 <- grazer_1 %>%
+  filter(site == "noyo")
+
+##averaging across the 2 dates for arkev plots
+grazer_4 <- grazer_3 %>%
+  group_by(arkev_type, species) %>%
+  summarize(mean_density = mean(mean_density), 
+            se_density = mean(se_density))
+
+##just arkev plots at noyo 
+grazer_5 <- grazer_3 %>%
+  filter(arkev_type == "ARKEV")
+
+##just urchins in arkev plots at noyo
+grazer_6 <- grazer_5 %>%
+  filter(species != "tegula")
+
+##just first survey at noyo 
+grazer_7 <- grazer_3 %>%
+  filter(date == "2026-05-06")
+
+#KELP
+##filtering for kelp
+kelp_1 <- build_6 %>%
+  group_by(site, date, arkev_type, species) %>%
+  filter(species %in% c("nera", "nerj", "lamr", "lamset", "ptecal", "desspp", "alamar", "coscos", "lamstump"))
+
+##filtering for big river 
+kelp_2 <- kelp_1 %>%
+  filter(site == "big_river") 
+
+##filtering for noyo 
+kelp_3 <- kelp_1 %>%
+  filter(site == "noyo")
+
+##averaging across the 2 dates for arkev plots
+kelp_4 <- kelp_3 %>%
+  group_by(arkev_type, species) %>%
+  summarize(mean_density = mean(mean_density), 
+            se_density = mean(se_density))
+
+##just arkev plots at noyo 
+kelp_5 <- kelp_3 %>%
+  filter(arkev_type == "ARKEV")
+
+##just urchins in arkev plots at noyo
+kelp_6 <- kelp_5 %>%
+  filter(species != "tegula")
+
+##just first survey at noyo 
+kelp_7 <- kelp_3 %>%
+  filter(date == "2026-05-06")
+
+#noyo just kelp that have been observed
+kelp_8 <- kelp_6 %>%
+  filter(species %in% c("desspp", "lamr", "nerj"))
+```
+
+```{r}
+#big river
+fig_a <- ggplot(grazer_2,
+  aes(x = species,
+      y = mean_density,
+      fill = arkev_type)) +
+  geom_col(position = position_dodge(), color = "black") +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "control" = "#a8c8a0")) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                width = 0.2, position = position_dodge(0.9)) +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Big River - 5/24/2026",
+       x = "Species",
+       y = "Mean density (ind. m⁻²)",
+       fill = "Treatment") + 
+  scale_y_continuous(expand = c(0, 0))
+
+#noyo averaged across months 
+ggplot(grazer_4,
+  aes(x = species,
+      y = mean_density,
+      fill = arkev_type)) +
+  geom_col(position = position_dodge(), color = "black") +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "control" = "#a8c8a0")) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                width = 0.2, position = position_dodge(0.9)) +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Noyo - May 2026", 
+       x = "Species",
+       y = "Mean density (ind. m⁻²)",
+       fill = "Treatment") + 
+  scale_y_continuous(expand = c(0, 0))
+
+#noyo first survey date  
+ggplot(grazer_7,
+  aes(x = species,
+      y = mean_density,
+      fill = arkev_type)) +
+  geom_col(position = position_dodge(), color = "black") +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "control" = "#a8c8a0")) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                width = 0.2, position = position_dodge(0.9)) +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Noyo - 5/6/2026", 
+       x = "Species",
+       y = "Mean density (ind. m⁻²)",
+       fill = "Treatment") + 
+  scale_y_continuous(expand = c(0, 0))
+
+#noyo grazers in arkev plots over time
+ggplot(grazer_5, aes(x = date,
+                    y = mean_density,
+                    color = species)) +
+  geom_line(aes(color = species), linewidth = 1.5) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = mean_density - se_density,
+        ymax = mean_density + se_density), linewidth = 0.75, width = 0.5) +
+  scale_color_manual(values = c("purple_urchins_large" = "purple4", 
+                                "purple_urchins_small" = "purple", 
+                                "red_urchins" = "red3", 
+                                "tegula" = "brown")) +
+  theme_classic()
+
+#noyo urchins in arkev plots over time 
+ggplot(grazer_6, aes(x = date,
+                    y = mean_density,
+                    color = species)) +
+  geom_line(aes(color = species), linewidth = 1.5) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = mean_density - se_density,
+        ymax = mean_density + se_density), linewidth = 0.75, width = 0.5) +
+  scale_color_manual(values = c("purple_urchins_large" = "purple4", 
+                                "purple_urchins_small" = "purple", 
+                                "red_urchins" = "red3")) +
+  theme_classic()
+
+```
+```{r}
+#HEATMAP
+#urchin density plot heatmap 
+
+```
+
+
+```{r}
+#KELP
+
+#big river
+ggplot(kelp_2,
+  aes(x = species,
+      y = mean_density,
+      fill = arkev_type)) +
+  geom_col(position = position_dodge(), color = "black") +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "control" = "#a8c8a0")) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                width = 0.2, position = position_dodge(0.9)) +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Big River - 5/24/2026",
+       x = "Species",
+       y = "Mean density (ind. m⁻²)",
+       fill = "Treatment") + 
+  scale_y_continuous(expand = c(0, 0))
+
+#noyo averaged across months 
+ggplot(kelp_4,
+  aes(x = species,
+      y = mean_density,
+      fill = arkev_type)) +
+  geom_col(position = position_dodge(), color = "black") +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "control" = "#a8c8a0")) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                width = 0.2, position = position_dodge(0.9)) +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Noyo - May 2026", 
+       x = "Species",
+       y = "Mean density (ind. m⁻²)",
+       fill = "Treatment") + 
+  scale_y_continuous(expand = c(0, 0))
+
+#noyo first survey date  
+ggplot(kelp_7,
+  aes(x = species,
+      y = mean_density,
+      fill = arkev_type)) +
+  geom_col(position = position_dodge(), color = "black") +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "control" = "#a8c8a0")) +
+  geom_errorbar(aes(ymin = mean_density - se_density,
+                    ymax = mean_density + se_density),
+                width = 0.2, position = position_dodge(0.9)) +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Noyo - 5/6/2026", 
+       x = "Species",
+       y = "Mean density (ind. m⁻²)",
+       fill = "Treatment") + 
+  scale_y_continuous(expand = c(0, 0))
+
+#noyo grazers in arkev plots over time
+ggplot(kelp_5, aes(x = date,
+                    y = mean_density,
+                    color = species)) +
+  geom_line(aes(color = species), linewidth = 1.5) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = mean_density - se_density,
+        ymax = mean_density + se_density), linewidth = 0.75, width = 0.5) +
+  theme_classic()
+
+#noyo urchins in arkev plots over time 
+ggplot(kelp_6, aes(x = date,
+                    y = mean_density,
+                    color = species)) +
+  geom_line(aes(color = species), linewidth = 1.5) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = mean_density - se_density,
+        ymax = mean_density + se_density), linewidth = 0.75, width = 0.5) +
+  theme_classic()
+
+#noyo just kelp that have been observed 
+fig_b <- ggplot(kelp_8, aes(x = date,
+                    y = mean_density,
+                    color = species)) +
+  geom_line(aes(color = species), linewidth = 1.5) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = mean_density - se_density,
+        ymax = mean_density + se_density), linewidth = 0.75, width = 0.5, position = "dodge") +
+  scale_color_manual(values = c(desspp = "#8c510a", lamr = "#80cdc1", nerj = "#01665e")) +
+  labs(title = "Noyo - Change in kelp density over time", 
+       x = "Date",
+       y = "Mean density (ind. m⁻²)",
+       fill = "Species") + 
+  theme_classic()
+
+#compare with arkev data
+```
+
+```{r}
+#BIG RIVER KELP RECRUITMENT 25 VS 26
+br_arkev_data_2025 <- read_sheet('https://docs.google.com/spreadsheets/d/1jhqeuVwg7_icGaYOh5YpMcoPubQsDs3fn9fWGcZmFi4/edit?gid=1766421584#gid=1766421584')
+
+#2025
+#making numeric columns numeric
+clean_1 <- br_arkev_data_2025 %>%
+  mutate(count = as.numeric(unlist(count)))
+ 
+#selecting for kelp data and early spring months
+clean_2 <- clean_1 %>%
+  dplyr::select(month, day, year, ARKEV_type, ARKEV_unit, data_type, species_code, count) %>%
+  filter(month == c("5")) %>%
+  mutate(date = as.Date(paste(year, month, day, sep = "-"))) %>%
+  dplyr::select(date, ARKEV_type, ARKEV_unit, data_type, species_code, count) %>%
+  filter(data_type == "kelp") %>%
+  dplyr::select(-data_type)
+ 
+#define expected unit suffixes per date (C & D on 5/8, B & E on 5/25)
+expected_units <- tribble(
+  ~date,              ~suffix,
+  as.Date("2025-05-08"), "C",
+  as.Date("2025-05-08"), "D",
+  as.Date("2025-05-25"), "B",
+  as.Date("2025-05-25"), "E")
+ 
+#build full expected unit list: every plot × date × suffix
+all_units <- clean_2 %>%
+  distinct(date, ARKEV_type, ARKEV_unit) %>%
+  mutate(plot = as.numeric(gsub("[A-Za-z]", "", ARKEV_unit))) %>%
+  distinct(date, ARKEV_type, plot) %>%
+  left_join(expected_units, by = "date") %>%
+  mutate(ARKEV_unit = paste0(
+    ifelse(str_detect(ARKEV_type, "control"), "C", ""), plot, suffix
+  )) %>%
+  dplyr::select(-suffix)
+ 
+#fill in missing combos of ARKEV_type × Date × species_code and getting rid of "no_kelp"
+clean_3 <- clean_2 %>%
+  filter(species_code != "NO_KELP") %>%
+  mutate(species_code = str_to_lower(species_code)) %>%
+  right_join(all_units, by = c("date", "ARKEV_type", "ARKEV_unit")) %>%
+  complete(
+    nesting(date, ARKEV_type, ARKEV_unit),
+    species_code,
+    fill = list(count = 0)) %>%
+  filter(!is.na(species_code)) %>%
+  mutate(plot = as.numeric(gsub("[A-Za-z]", "", ARKEV_unit)))  # ← derive here
+ 
+#calculate density per arkev unit
+clean_4 <- clean_3 %>%
+  dplyr::select(date, ARKEV_type, plot, ARKEV_unit, species_code, count) %>%
+  mutate(density = count / (pi)) %>%
+  rename(treatment = ARKEV_type, species = species_code)
+ 
+#getting se
+clean_5 <- clean_4 %>%
+  group_by(date, treatment, plot, species) %>%
+  summarise(mean_density = mean(density),
+            se_density   = sd(density) / sqrt(n()), n = n(), .groups = "drop") %>%
+  mutate(treatment = recode(treatment, "ARKEV_control" = "control"))
+
+#filtering for 5/25 date to compare across same time point in 2026 
+clean_6 <- clean_5 %>%
+  filter(date == "2025-05-25")
+
+
+
+#2026
+#making numeric columns numeric and selecting relevant columns
+clean_1_26 <- build_1 %>%
+  mutate(across(c(nera, nerj, lamr, lamset, desspp, alamar, coscos, lamstump), as.numeric))
+
+#selecting relevant columns and filtering for may
+clean_2_26 <- clean_1_26 %>%
+  dplyr::select(date, site, arkev_type, arkev_unit, nera, nerj, lamr, lamset, desspp, alamar, coscos, lamstump) %>%
+  filter(month(date) == 5)
+
+#pivot to long format, keeping only kelp species of interest
+clean_3_26 <- clean_2_26 %>%
+  pivot_longer(
+    cols = c(nera, nerj, lamr, lamset, desspp, alamar, coscos, lamstump),
+    names_to  = "species",
+    values_to = "count")
+
+#define expected unit suffixes per site × date
+expected_units_26 <- tribble(
+  ~site,        ~date,                ~suffix,
+  "noyo",       as.Date("2026-05-06"), "A",
+  "noyo",       as.Date("2026-05-06"), "C",
+  "noyo",       as.Date("2026-05-25"), "C",
+  "noyo",       as.Date("2026-05-25"), "E",
+  "big_river",  as.Date("2026-05-24"), "A",
+  "big_river",  as.Date("2026-05-24"), "C")
+
+#build full expected unit list: every site × date × plot × suffix
+all_units_26 <- clean_3_26 %>%
+  distinct(date, site, arkev_type, arkev_unit) %>%
+  mutate(plot = as.numeric(gsub("[A-Za-z]", "", arkev_unit))) %>%
+  distinct(date, site, arkev_type, plot) %>%
+  left_join(expected_units_26, by = c("date", "site")) %>%
+  mutate(arkev_unit = paste0(
+    ifelse(str_detect(arkev_type, "control"), "C", ""), plot, suffix
+  )) %>%
+  dplyr::select(-suffix)
+
+#fill in missing unit × species combos with zeros
+clean_4_26 <- clean_3_26 %>%
+  right_join(all_units_26, by = c("date", "site", "arkev_type", "arkev_unit")) %>%
+  complete(
+    nesting(date, site, arkev_type, arkev_unit),
+    species,
+    fill = list(count = 0)
+  ) %>%
+  filter(!is.na(species)) %>%
+  mutate(plot = as.numeric(gsub("[A-Za-z]", "", arkev_unit))) %>%
+  rename(treatment = arkev_type)
+
+#getting density 
+clean_5_26 <- clean_4_26 %>%
+  dplyr::select(site, date, treatment, plot, arkev_unit, species, count) %>%
+  mutate(density = count / (pi))
+ 
+
+#setting se
+clean_6_26 <- clean_5_26 %>%
+  group_by(date, treatment, plot, species, site) %>%
+  summarise(mean_density = mean(density),
+            se_density   = sd(density) / sqrt(n()), n = n(), .groups = "drop")
+
+#filtering for just big river
+clean_7_26 <- clean_6_26 %>%
+  filter(site == "big_river")
+```
+
+
+```{r}
+#assign cardinal directions based on plot × treatment pattern
+#even plots: ARKEV = North, control = South
+#odd plots: ARKEV = South, control = North
+ 
+assign_cardinal <- function(df) {
+  df %>%
+    mutate(cardinal = case_when(
+      plot %% 2 == 0 & treatment == "ARKEV"   ~ "North",
+      plot %% 2 == 0 & treatment == "control" ~ "South",
+      plot %% 2 == 1 & treatment == "ARKEV"   ~ "South",
+      plot %% 2 == 1 & treatment == "control" ~ "North" ))}
+ 
+#apply to both years and filter to plots 1-7
+big_river_2025 <- clean_6 %>%         # replace with your actual 2025 object filtered to 5/25
+  filter(plot <= 7) %>%
+  assign_cardinal() %>%
+  mutate(year = 2025)
+ 
+big_river_2026 <- clean_6_26 %>%
+  filter(site == "big_river", plot <= 7) %>%
+  assign_cardinal() %>%
+  mutate(year = 2026)
+ 
+#combine
+big_river_combined <- bind_rows(big_river_2025, big_river_2026) %>%
+  dplyr::select(-site)
+
+```
+
+
+```{r}
+
+# ── prep ──────────────────────────────────────────────────────────────────────
+plot_data <- big_river_combined %>%   # replace with your actual object name
+  filter(species %in% c("lamr", "nerj")) %>%
+  mutate(
+    species = recode(species,
+                     "lamr" = "Lam. spp. recruits",   # adjust to actual species names
+                     "nerj" = "Nereo juveniles"),
+    year      = factor(year),
+    treatment = factor(treatment, levels = c("ARKEV", "control"))
+  )
+
+# ── shared theme ──────────────────────────────────────────────────────────────
+kelp_theme <- theme_classic(base_size = 12) +
+  theme(
+    axis.line          = element_line(colour = "white", linewidth = 0.4),
+    axis.ticks         = element_line(colour = "grey30", linewidth = 0.4),
+    axis.text          = element_text(colour = "grey20"),
+    axis.title         = element_text(colour = "grey20"),
+    strip.background   = element_blank(),
+    strip.text         = element_text(face = "italic", size = 11),
+    legend.position    = "top",
+    legend.justification = "left",
+    legend.key.width   = unit(1.5, "lines"),
+    legend.margin      = margin(b = 4),
+    panel.grid.major.y = element_line(colour = "grey92", linewidth = 0.3),
+    plot.margin        = margin(12, 16, 8, 8))
+
+year_colors  <- c("2025" = "#1D9E75", "2026" = "#7F77DD")
+year_shapes  <- c("2025" = 16,        "2026" = 17)
+
+# ── figure 1: treatment comparison across years ───────────────────────────────
+# summarise to treatment × year × species (averaging across plots)
+fig1_data <- plot_data %>%
+  group_by(year, treatment, species) %>%
+  summarise(
+    se   = sqrt(sum(se_density^2, na.rm = TRUE)) / n(),
+    mean_density = mean(mean_density, na.rm = TRUE),
+    .groups = "drop")
+
+fig_c1 <- ggplot(fig1_data,
+               aes(x = treatment, y = mean_density,
+                   color = year, shape = year, group = year)) +
+  geom_errorbar(
+    aes(ymin = mean_density - se, ymax = mean_density + se),
+    linewidth = 0.5, width = 0.15, alpha = 0.7,
+    position = position_dodge(width = 0.4)
+  ) +
+  geom_line(linewidth = 0.8,
+            position = position_dodge(width = 0.4),
+            linetype = "dashed", alpha = 0.6) +
+  geom_point(size = 3, stroke = 0.8,
+             position = position_dodge(width = 0.4)) +
+  scale_color_manual(values = year_colors, name = NULL) +
+  scale_shape_manual(values = year_shapes, name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  facet_wrap(~ species, scales = "free_y") +
+  labs(
+    title = "Big River 5/25/2025 vs 5/24/2026",
+    x = "Treatment",
+    y = expression("Mean density" ~ (individuals ~ m^{-2}))
+  ) +
+  kelp_theme
+
+# ── figure 2: spatial pattern across years ────────────────────────────────────
+# plot on x-axis (W → E), separate panels per species × treatment
+fig_d <- ggplot(plot_data,
+               aes(x = plot, y = mean_density,
+                   color = year, shape = year)) +
+  geom_errorbar(
+    aes(ymin = mean_density - se_density, ymax = mean_density + se_density),
+    linewidth = 0.5, width = 0.3, alpha = 0.6,
+    position = position_dodge(width = 0.4)
+  ) +
+  geom_line(linewidth = 0.8, alpha = 0.7,
+            position = position_dodge(width = 0.4)) +
+  geom_point(size = 2.5, stroke = 0.8,
+             position = position_dodge(width = 0.4)) +
+  scale_color_manual(values = year_colors, name = NULL) +
+  scale_shape_manual(values = year_shapes, name = NULL) +
+  scale_x_continuous(breaks = 1:7,
+                     labels = c("1\n(W)", 2:6, "7\n(E)")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  facet_grid(species ~ treatment, scales = "free_y") +
+  labs(title = "Big River 5/25/2025 vs 5/24/2026",
+    x = "Plot (West → East)",
+    y = expression("Mean density" ~ (individuals ~ m^{-2}))
+  ) +
+  kelp_theme +
+  theme(strip.text.y = element_text(face = "italic"))
+
+
+year_fills  <- c("2025" = "#9FE1CB", "2026" = "#CECBF6")
+# ── figure 1: treatment comparison across years ───────────────────────────────
+fig_c2 <- ggplot(plot_data,
+               aes(x = treatment, y = mean_density,
+                   color = year, fill = year)) +
+  geom_boxplot(
+    aes(group = interaction(treatment, year)),
+    position      = position_dodge(width = 0.6),
+    width         = 0.45,
+    linewidth     = 0.5,
+    outlier.shape = NA,
+    alpha         = 0.4
+  ) +
+  geom_point(
+    aes(shape = year),
+    position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.6),
+    size     = 2.5,
+    alpha    = 0.85
+  ) +
+  scale_color_manual(values = year_colors, name = NULL) +
+  scale_fill_manual(values  = year_fills,  name = NULL) +
+  scale_shape_manual(values = year_shapes, name = NULL) +
+  facet_wrap(~ species, scales = "free_y") +
+  labs(title = "Big River 5/25/2025 vs 5/24/2026",
+    x = "Treatment",
+    y = expression("Mean density" ~ (individuals ~ m^{-2}))
+  ) +
+  kelp_theme
+ 
+```
+
+```{r}
+#recoding spring heatmaps without plots 8-10
+big_river_spring_recruitment = read_sheet('https://docs.google.com/spreadsheets/d/10cycCffIPLnrWE9QSD1MXqvty4o4RwntHcomYzE3p6M/edit?gid=0#gid=0')
+
+# ── late april ────────────────────────────────────────────────────────────────
+big_river_april_recruitment <- big_river_spring_recruitment %>%
+  filter(month == "4", !plot %in% c(8, 9, 10)) %>%
+  mutate(across(c(LAMR, NERJ, NERA), as.numeric))
+ 
+april_quadrants <- big_river_april_recruitment %>%
+  mutate(quadrant = case_when(
+    plot >= 6 & N_S == "North" ~ "NE",
+    plot >= 6 & N_S == "South" ~ "SE",
+    plot <= 5 & N_S == "North" ~ "NW",
+    plot <= 5 & N_S == "South" ~ "SW")) %>%
+  group_by(quadrant) %>%
+  summarise(
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop")
+ 
+# ── early may ─────────────────────────────────────────────────────────────────
+big_river_may_recruitment <- big_river_spring_recruitment %>%
+  filter(month == "5", !plot %in% c(8, 9, 10)) %>%
+  mutate(across(c(LAMR, NERJ, NERA), as.numeric))
+ 
+may_quadrants <- big_river_may_recruitment %>%
+  mutate(quadrant = case_when(
+    plot >= 6 & N_S == "North" ~ "NE",
+    plot >= 6 & N_S == "South" ~ "SE",
+    plot <= 5 & N_S == "North" ~ "NW",
+    plot <= 5 & N_S == "South" ~ "SW")) %>%
+  group_by(quadrant) %>%
+  summarise(
+    Total_LAMR = sum(LAMR, na.rm = TRUE),
+    Total_NERJ = sum(NERJ, na.rm = TRUE),
+    .groups = "drop")
+ 
+# ── combine and reshape ───────────────────────────────────────────────────────
+all_long <- bind_rows(
+  april_quadrants %>% mutate(date = "Late April"),
+  may_quadrants   %>% mutate(date = "Early May")
+) %>%
+  mutate(date = factor(date, levels = c("Late April", "Early May"))) %>%
+  pivot_longer(cols = c(Total_LAMR, Total_NERJ),
+               names_to  = "species",
+               values_to = "count") %>%
+  mutate(
+    species = recode(species,
+                     "Total_LAMR" = "LAMR",
+                     "Total_NERJ" = "NERJ"),
+    species = factor(species, levels = c("LAMR", "NERJ")),
+    x_pos   = factor(ifelse(grepl("E", quadrant), "E", "W"), levels = c("W", "E")),
+    y_pos   = factor(ifelse(grepl("N", quadrant), "N", "S"), levels = c("N", "S"))
+  )
+ 
+# ── figure ────────────────────────────────────────────────────────────────────
+fig_e <- ggplot(all_long, aes(x = x_pos, y = y_pos, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = count), color = "grey20", size = 4) +
+  facet_grid(species ~ date) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_y_discrete(limits = rev) +
+  labs(
+    title    = "Big River Restoration Site: LAMR & NERJ Counts by Quadrant",
+    subtitle = "Plots 1–7 only | Late April & Early May 2026",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text   = element_text(face = "bold", size = 13),
+    panel.grid   = element_blank(),
+    axis.text    = element_text(color = "black", face = "bold"),
+    plot.title   = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey50")
+  )
+
+# ── late april ────────────────────────────────────────────────────────────────
+big_river_april_recruitment <- big_river_spring_recruitment %>%
+  filter(month == "4", !plot %in% c(8, 9, 10)) %>%
+  mutate(across(c(LAMR, NERJ, NERA), as.numeric))
+ 
+# ── early may ─────────────────────────────────────────────────────────────────
+big_river_may_recruitment <- big_river_spring_recruitment %>%
+  filter(month == "5", !plot %in% c(8, 9, 10)) %>%
+  mutate(across(c(LAMR, NERJ, NERA), as.numeric))
+ 
+# ── combine and reshape ───────────────────────────────────────────────────────
+all_long <- bind_rows(
+  big_river_april_recruitment %>% mutate(date = "Late April"),
+  big_river_may_recruitment   %>% mutate(date = "Early May")
+) %>%
+  mutate(date = factor(date, levels = c("Late April", "Early May"))) %>%
+  pivot_longer(cols = c(LAMR, NERJ),
+               names_to  = "species",
+               values_to = "count") %>%
+  mutate(
+    species = factor(species, levels = c("LAMR", "NERJ")),
+    plot    = factor(plot, levels = 1:7),
+    N_S     = factor(N_S, levels = c("North", "South"))
+  )
+ 
+# ── figure ────────────────────────────────────────────────────────────────────
+fig_f <- ggplot(all_long, aes(x = plot, y = N_S, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = count), color = "grey20", size = 3.5) +
+  facet_grid(species ~ date) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e", name = "Count") +
+  scale_y_discrete(limits = rev) +
+  scale_x_discrete(labels = c("1\n(W)", "2", "3", "4", "5", "6", "7\n(E)")) +
+  labs(
+    title    = "Big River Restoration Site: LAMR & NERJ Counts by Plot",
+    subtitle = "Plots 1–7 only | Late April & Early May 2026",
+    x = "Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text    = element_text(face = "bold", size = 13),
+    panel.grid    = element_blank(),
+    axis.text     = element_text(color = "black", face = "bold"),
+    plot.title    = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey50")
+  )
+```
+
+```{r}
+#2026 urchin maps
+#making numeric columns numeric and selecting relevant columns
+map_1 <- build_4 %>%
+  mutate(across(c(purple_urchins_small, purple_urchins_large, red_urchins, tegula), as.numeric))
+
+#selecting relevant columns and filtering for may
+map_2 <- map_1 %>%
+  dplyr::select(date, site, arkev_type, arkev_unit, purple_urchins_small, purple_urchins_large, red_urchins, tegula) %>%
+  filter(month(date) == 5)
+
+#pivot to long format, keeping only kelp species of interest
+map_3 <- map_2 %>%
+  pivot_longer(
+    cols = c(purple_urchins_small, purple_urchins_large, red_urchins, tegula),
+    names_to  = "species",
+    values_to = "density")
+
+#define expected unit suffixes per site × date
+expected_units_26 <- tribble(
+  ~site,        ~date,                ~suffix,
+  "noyo",       as.Date("2026-05-06"), "A",
+  "noyo",       as.Date("2026-05-06"), "C",
+  "noyo",       as.Date("2026-05-25"), "C",
+  "noyo",       as.Date("2026-05-25"), "E",
+  "big_river",  as.Date("2026-05-24"), "A",
+  "big_river",  as.Date("2026-05-24"), "C")
+
+#build full expected unit list: every site × date × plot × suffix
+all_units_map_3 <- map_3 %>%
+  distinct(date, site, arkev_type, arkev_unit) %>%
+  mutate(plot = as.numeric(gsub("[A-Za-z]", "", arkev_unit))) %>%
+  distinct(date, site, arkev_type, plot) %>%
+  left_join(expected_units_26, by = c("date", "site")) %>%
+  mutate(arkev_unit = paste0(
+    ifelse(str_detect(arkev_type, "control"), "C", ""), plot, suffix
+  )) %>%
+  dplyr::select(-suffix)
+
+#fill in missing unit × species combos with zeros
+map_4 <- map_3 %>%
+  right_join(all_units_26, by = c("date", "site", "arkev_type", "arkev_unit")) %>%
+  complete(
+    nesting(date, site, arkev_type, arkev_unit),
+    species,
+    fill = list(count = 0)
+  ) %>%
+  filter(!is.na(species)) %>%
+  mutate(plot = as.numeric(gsub("[A-Za-z]", "", arkev_unit))) %>%
+  rename(treatment = arkev_type)
+
+#setting se
+map_5 <- map_4 %>%
+  group_by(date, treatment, plot, species, site) %>%
+  summarise(mean_density = mean(density),
+            se_density   = sd(density) / sqrt(n()), n = n(), .groups = "drop")
+
+#filtering for just big river
+map_6 <- map_5 %>%
+  filter(site == "big_river")
+
+
+#apply to both years and filter to plots 1-7
+map_7 <- map_6 %>%         # replace with your actual 2025 object filtered to 5/25
+  filter(plot <= 10) %>%
+  assign_cardinal() 
+
+#noyo
+map_8 <- map_5 %>%
+  filter(site == "noyo") %>%
+  filter(plot <= 10) %>%
+  assign_cardinal() 
+
+#averaging acorss dates
+map_9 <- map_8
+
+```
+```{r}
+#big river
+tornado_df <- map_7 %>%
+mutate(plot = factor(plot,levels = c(8, 9, 10, 1, 2, 3, 4, 5, 6, 7)), density_plot = if_else(cardinal == "South",
+                           -mean_density,
+                           mean_density))
+
+tornado_df <- tornado_df %>%
+  mutate(
+    species = factor(
+      species,
+      levels = c("tegula", "red_urchins",
+        "purple_urchins_large", 
+        "purple_urchins_small")))
+
+species_cols <- c(
+  "purple_urchins_small" = "#6A3D9A",
+  "purple_urchins_large" = "lavender",
+  "red_urchins" = "#E31A1C",
+  "tegula" = "#1F78B4"
+)
+
+fig_f <- ggplot(tornado_df,
+       aes(x = plot, y = density_plot, fill = species)) +
+  geom_col(position = "stack", color = "black") +
+  geom_hline(yintercept = 0, linewidth = 0.4) +
+    scale_fill_manual(values = species_cols) +
+  scale_y_continuous(labels = abs) +
+  annotate("text", x = 3, y = 40, label = "North", fontface = "bold") +
+  annotate("text", x = 3, y = -40, label = "South", fontface = "bold") +
+  labs(title = "Spatial distribution of grazer density at Big River on 5/24/2026", x = "Plot", y = "Mean density (ind/m2)", fill = "Species") +
+  theme_classic()
+
+
+
+#noyo
+noyo_tornado_df <- map_9 %>%
+mutate(plot = factor(plot,levels = c(3, 4, 5, 6, 7, 8, 9, 10, 1, 2)), density_plot = if_else(cardinal == "South",
+                           -mean_density,
+                           mean_density))
+
+noyo_tornado_df <- noyo_tornado_df %>%
+  mutate(
+    species = factor(
+      species,
+      levels = c("tegula", "red_urchins",
+        "purple_urchins_large", 
+        "purple_urchins_small")))
+
+species_cols <- c(
+  "purple_urchins_small" = "#6A3D9A",
+  "purple_urchins_large" = "lavender",
+  "red_urchins" = "#E31A1C",
+  "tegula" = "#1F78B4"
+)
+
+fig_g <- ggplot(noyo_tornado_df,
+       aes(x = plot, y = density_plot, fill = species)) +
+  geom_col(position = "stack", color = "black") +
+  geom_hline(yintercept = 0, linewidth = 0.4) +
+    scale_fill_manual(values = species_cols) +
+  scale_y_continuous(labels = abs) +
+  annotate("text", x = 3, y = 40, label = "North", fontface = "bold") +
+  annotate("text", x = 3, y = -40, label = "South", fontface = "bold") +
+  labs(title = "Spatial distribution of grazer density at Noyo on 5/24/2026", x = "Plot", y = "Mean density (ind/m2)", fill = "Species") +
+  theme_classic()
+```
+
+
+#figures that i care about 
+```{r}
+fig_a
+fig_b
+fig_c1
+fig_c2
+fig_d
+fig_e
+fig_f
+fig_g
+#moved 8, 9, 10 just do 1-7, then average spring 2025 and compare to spring 2026
+```
+
