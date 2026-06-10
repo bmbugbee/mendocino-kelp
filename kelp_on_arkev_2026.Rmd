@@ -135,11 +135,19 @@ stipe_noyo = koa_master %>%
   mutate(avg_length = mean(stipe_length),
             se = sd(stipe_length)/sqrt(length(stipe_length)),
          max = max(stipe_length)) |>
+  group_by(date) %>%
+  mutate(avg_length = mean(stipe_length),
+            se_length = sd(stipe_length)/sqrt(length(stipe_length)),
+         max_length = max(stipe_length)) %>%
 group_by(date, ARKEV_type) |>
   mutate(avg_length_type = mean(stipe_length),
             se_type = sd(stipe_length)/sqrt(length(stipe_length)),
-         max_type = max(stipe_length))
+         max_type = max(stipe_length)) 
+  
 ```
+
+```{r}
+
 
 
 ```{r}
