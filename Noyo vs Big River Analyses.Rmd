@@ -70,9 +70,9 @@ noyo_MASTER_cleaned <- noyo_MASTER_25 %>%
   ) %>%
   mutate(Date = make_date(year, month, day))
 ```
-
-#Benthic Community Composition
-##df
+#NOYO
+##Benthic Community Composition
+###df
 ```{r}
 noyo_benthic_data <- noyo_MASTER_cleaned %>%
   filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
@@ -115,7 +115,7 @@ noyo_balance <- noyo_benthic_data_cleaned %>%
 
 anyNA(noyo_balance)
 ```
-##ARKEV vs. Controls (per unit)
+###ARKEV vs. Controls (per unit)
 ```{r}
 #averaging density across arkev units 
 noyo_unit <- noyo_balance %>%
@@ -142,12 +142,14 @@ set.seed(123)
 nmds_noyo_unit <- metaMDS(comm_unit, distance = "bray", k = 2)
 
 #PERMANOVA
-adonis2(nmds_noyo_unit ~ ARKEV_type, data = meta_unit, method = "bray")
-
+#adonis2(comm_unit ~ ARKEV_type, data = meta_unit, method = "bray")
+#
 
 #plot NMDS
-site_scores <- as.data.frame(scores(nmds_noyo_unit, display = "sites")) %>%
+site_scores <- as.data.frame(vegan::scores(nmds_noyo_unit, display = "sites")) %>%
   bind_cols(meta_unit)
+
+
 
 
 ggplot() +
@@ -236,8 +238,8 @@ all_sites_cleaned <- all_sites %>%
   mutate(Date = make_date(year, month, day))
 ```
 
-#Benthic Community Composition
-##df
+##Benthic Community Composition
+###df
 ```{r}
 all_sites_benthic_data <- all_sites_cleaned %>%
   filter(data_type %in% c("urchins", "kelp", "inverts", "tegula")) %>%
@@ -276,8 +278,9 @@ all_balance <- all_sites_benthic_data_cleaned %>%
 
 anyNA(all_balance)
 ```
-##Noyo vs. Big River (per unit)
+###Noyo vs. Big River (per unit)
 ```{r}
+library(ggplot2)
 #averaging density across arkev units 
 all_unit <- all_balance %>%
     filter(month != 10) %>%
@@ -313,7 +316,7 @@ adonis2(comm_unit ~ site, data = meta_unit, method = "bray")
 
 
 #plot NMDS
-site_scores <- as.data.frame(scores(nmds_all_unit, display = "sites")) %>%
+site_scores <- as.data.frame(vegan::scores(nmds_all_unit, display = "sites")) %>%
   bind_cols(meta_unit)
 
 
@@ -338,7 +341,7 @@ ggplot() +
     y = "NMDS2",
     color = "Treatment"
   ) +
-  scale_color_manual(values = c("Noyo" = "lightblue", "Big_River" = "salmon")) +
+  scale_color_manual(values = c("Noyo" = "#edf8b1", "Big_River" = "#2c7fb8")) +
   theme(
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
@@ -357,10 +360,10 @@ ggplot() +
 #getting species vectors 
 species_fit <- envfit(nmds_all_unit, comm_unit, permutations = 999)
 
-scores_sites <- as.data.frame(scores(nmds_all_unit, display = "sites"))
+scores_sites <- as.data.frame(vegan::scores(nmds_all_unit, display = "sites"))
 scores_sites <- cbind(scores_sites, meta_unit)
 
-scores_species <- as.data.frame(scores(species_fit, display = "vectors"))
+scores_species <- as.data.frame(vegan::scores(species_fit, display = "vectors"))
 scores_species$species <- rownames(scores_species)
 scores_species$pval <- species_fit$vectors$pvals
 
@@ -392,7 +395,7 @@ geom_segment(
     y = "NMDS2",
     color = "Treatment"
   ) +
-  scale_color_manual(values = c("Noyo" = "lightblue", "Big_River" = "salmon")) +
+  scale_color_manual(values = c("Noyo" = "#edf8b1", "Big_River" = "#2c7fb8")) +
   theme(
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
@@ -495,7 +498,7 @@ sig_species %>%
     title = "Indicator Species by Site",
     subtitle = "Dot color = significance (p-value); dot size = indicator strength"
   ) +
-  theme_bw(base_size = 12) +
+  theme_classic(base_size = 12) +
   theme(
     axis.text.y = element_text(size = 10),
     strip.background = element_rect(fill = "gray90"),
@@ -503,4 +506,262 @@ sig_species %>%
   )
 
 ```
+#Urchin Density over Time
+```{r}
+urchin_balance <- all_balance %>%
+  filter(ARKEV_type != "ARKEV_control") %>%
+  select(c(site, month, ARKEV_unit, MESFRA, `STRPUR_<2cm`, `STRPUR_>2cm`))
+
+plot_df <- urchin_balance %>%
+  pivot_longer(
+    cols = c(MESFRA, `STRPUR_<2cm`, `STRPUR_>2cm`),
+    names_to = "metric",
+    values_to = "density"
+  ) %>%
+  mutate(
+    species = case_when(
+      metric == "MESFRA" ~ "Red urchins",
+      TRUE               ~ "Purple urchins"
+    ),
+    size_class = case_when(
+      metric == "MESFRA"        ~ "all",
+      metric == "STRPUR_<2cm"   ~ "<2cm",
+      metric == "STRPUR_>2cm"   ~ ">2cm"
+    )
+  ) %>%
+  group_by(site, month, species, size_class) %>%
+  summarise(mean_density = mean(density, na.rm = TRUE), .groups = "drop")
+
+purple_df <- plot_df %>% filter(species == "Purple urchins")
+red_df    <- plot_df %>% filter(species == "Red urchins")
+
+ggplot() +
+  # Purple: color = site, linetype = size class
+  geom_line(data = purple_df,
+            aes(x = month, y = mean_density, color = site, linetype = size_class),
+            linewidth = 1) +
+  geom_point(data = purple_df,
+             aes(x = month, y = mean_density, color = site, linetype = size_class),
+             size = 2) +
+
+  # Red: color = site only (no linetype mapping)
+  geom_line(data = red_df,
+            aes(x = month, y = mean_density, color = site),
+            linewidth = 1) +
+  geom_point(data = red_df,
+             aes(x = month, y = mean_density, color = site),
+             size = 2) +
+
+  facet_grid(species ~ ., scales = "free_y") +
+  scale_x_continuous(breaks = sort(unique(plot_df$month))) +
+  labs(x = "Month", y = "Mean density (indv/m^2)", color = "Site", linetype = "Purple size class") +
+  theme_bw()
+```
+
+#Fish
+```{r}
+library(lubridate)
+
+fish <- all_sites_cleaned %>%
+filter(data_type %in% c("fish_on", "fish_off")) %>%
+  filter(ARKEV_type != "ARKEV_control") %>%
+  select(c(year, month,day, site, ARKEV_type, ARKEV_unit, data_type, species_code, count)) %>%
+  mutate(date = make_date(year, month, day))
+
+View(fish)
+
+
+sum_fish <- fish %>%
+  group_by(month, date, site, ARKEV_type, ARKEV_unit, data_type) %>%
+  summarise(fish_density = sum(count[species_code != "NO_FISH"], na.rm = TRUE),
+            species_richness = n_distinct(species_code[species_code != "NO_FISH" & count > 0]),
+            .groups = "drop")
+View(sum_fish)
+
+
+
+```
+##Richness
+###per month
+```{r}
+fish_monthly <- sum_fish %>%
+  group_by(data_type, month, site) %>%
+summarise(
+  mean_richness = mean(species_richness),
+  se_richness   = sd(species_richness) / sqrt(n()),
+  n_units       = n(),
+  .groups = "drop"
+)
+
+library(ggthemes)
+
+trt_loc_colors <- c(
+  "Big_River"       = "#BA5A4A",
+  "Noyo" = "#F4A14E"
+)
+
+ggplot(fish_monthly, aes(x = month, y = mean_richness, color = site, linetype = data_type)) +
+  scale_linetype_manual(
+  values = c(
+    "fish_on"  = "solid",
+    "fish_off" = "dashed")) + 
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_richness - se_richness, ymax = mean_richness + se_richness), width = 0.1) +
+  scale_x_continuous(breaks = sort(unique(fish_monthly$month))) +
+   scale_color_manual(values = trt_loc_colors) +
+  labs(title = "Mean Species Richness of Fish by Month", x = "Month", y = "Mean species richness", color = "Site", linetype = "Location") +
+  theme_bw(base_size = 14) 
+
+
+```
+
+```{r}
+ggplot(fish_monthly,
+       aes(x = month,
+           y = mean_richness,
+           linetype = data_type)) +
+  geom_line(linewidth = 1, color = "black") +
+  geom_point(size = 2, color = "black") +
+  geom_errorbar(
+    aes(ymin = mean_richness - se_richness,
+        ymax = mean_richness + se_richness),
+    width = 0.1,
+    color = "black"
+  ) +
+  facet_wrap(~ site, ncol = 1) +
+  scale_x_continuous(breaks = sort(unique(fish_monthly$month))) +
+  scale_linetype_manual(
+    values = c("fish_off" = "dashed", "fish_on" = "solid")
+  ) +
+  labs(
+      title = "Average Species Richness of Fish per Month",
+    x = "Month",
+    y = "Mean species richness",
+    linetype = "Location"
+  ) +
+  theme_classic()
+
+```
+###per site
+```{r}
+
+mean_fish <- sum_fish %>%
+  group_by(site, data_type) %>%
+  summarise(mean_richness = mean(species_richness, na.rm = TRUE),
+    se_richness   = sd(species_richness, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+mean_fish <- mean_fish %>%
+  mutate(data_type = factor(data_type, levels = c("fish_on", "fish_off")))
+
+loc_colors <- c(
+  "fish_on" = "#BA5A4A",
+  "fish_off"  = "#F4A14E"
+)
+
+pd <- position_dodge(width = 0.7)
+
+ggplot(mean_fish,
+       aes(x = site, y = mean_richness, fill = data_type)) +
+  geom_col(position = pd, color = "black", width = 0.7) +
+  geom_errorbar(
+    aes(ymin = mean_richness - se_richness,
+        ymax = mean_richness + se_richness),
+    position = pd, width = 0.2, linewidth = 0.7
+  ) +
+  scale_fill_manual(values = loc_colors) +
+  theme_bw(base_size = 14) +
+  labs(
+    title = "Mean Species Richness of Fish by Site",
+    x = "Site",
+    y = "Mean Species Richness",
+    fill = "Location"
+  )
+
+```
+##Rockfish Density
+```{r}
+rockfish_codes <- c("KGBC", "OYT", "SMEL", "YOY", "SMYS", "SCAU", "SPIN", "SATR", "SCAR")
+
+rockfish <- fish %>%
+  group_by(month, date, site, ARKEV_type, ARKEV_unit, data_type) %>%
+  summarise(
+    fish_density = sum(count[species_code %in% rockfish_codes], na.rm = TRUE),
+    species_richness = n_distinct(
+      species_code[species_code %in% rockfish_codes & count > 0]
+    ), n_units      = n(),
+    .groups = "drop"
+  )
+
+# sanity check: do you actually have zero units included?
+rockfish %>% summarise(
+  n_units = n(),
+  n_zero_density = sum(fish_density == 0)
+)
+
+
+rockfish_density_monthly <- rockfish %>%
+  group_by(data_type, month, site) %>%
+  summarise(
+    mean_density = mean(fish_density, na.rm = TRUE),
+    se_density  = sd(fish_density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+trt_loc_colors <- c(
+  "Big_River"       = "#BA5A4A",
+  "Noyo" = "#F4A14E")
+
+ggplot(rockfish_density_monthly, aes(x = month, y = mean_density, color = site, linetype = data_type)) +
+  scale_linetype_manual(
+  values = c(
+    "fish_on"  = "solid",
+    "fish_off" = "dashed")) + 
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_density - se_density, ymax = mean_density + se_density), width = 0.1) +
+  scale_x_continuous(breaks = sort(unique(rockfish_density_monthly$month))) +
+   scale_color_manual(values = trt_loc_colors) +
+  labs(title = "Average Abundance of Rockfish by Month", x = "Month", y = "Average Abundance", color = "Site", linetype = "Location") +
+  theme_bw(base_size = 14) 
+```
+
+```{r}
+
+rockfish_density_monthly <- rockfish %>%
+  group_by(site, data_type) %>%
+  summarise(
+    mean_density = mean(fish_density, na.rm = TRUE),
+    se_density  = sd(fish_density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+rockfish_density_monthly <- rockfish_density_monthly %>%
+  mutate(data_type = factor(data_type, levels = c("fish_on", "fish_off")))
+
+loc_colors <- c(
+  "fish_on" = "#BA5A4A",
+  "fish_off"  = "#F4A14E"
+)
+
+pd <- position_dodge(width = 0.7)
+
+ggplot(rockfish_density_monthly,
+       aes(x = site, y = mean_density, fill = data_type)) +
+  geom_col(position = pd, color = "black", width = 0.7) +
+  geom_errorbar(
+    aes(ymin = mean_density - se_density,
+        ymax = mean_density + se_density),
+    position = pd, width = 0.2, linewidth = 0.7
+  ) +
+  scale_fill_manual(values = loc_colors) +
+  theme_bw(base_size = 14) +
+  labs(
+    title = "Average Abundance of Rockfish by Site",
+    x = "Site",
+    y = "Average Abundance",
+    fill = "Location"
+  )
+
+  ```
 
