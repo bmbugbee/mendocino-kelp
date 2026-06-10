@@ -17,40 +17,42 @@ library(purrr)
 library(ggplot2)
 
 #importing datasheet 
-BR_kelp_on_ARKEV = read_sheet('https://docs.google.com/spreadsheets/d/1l6NO6pFVohLwITTuSAvfbK4nDKBuvancQViwdqi8mGk/edit?gid=1287716153#gid=1287716153')
-
+BR_kelp_on_ARKEV = read_sheet('https://docs.google.com/spreadsheets/d/1nWJDYH7leYlrxELEDiWJBfRdoLalrXEGbhWi7NosBOM/edit?gid=0#gid=0')
 
 kelp_on_ARKEV_clean <- BR_kelp_on_ARKEV %>%
+  select(-og_ID)  %>% 
   mutate(stipe_length  = map_dbl(stipe_length,  ~ if (length(.x) == 0) NA_real_ else as.numeric(.x[1])),
-       kelp_on_ARKEV = map_dbl(kelp_on_ARKEV, ~ if (length(.x) == 0) NA_real_ else as.numeric(.x[1])),
-       date = as.Date(paste(year, month, day, sep = "-"))) %>%
-  dplyr::select(-og_ID)
-
+    kelp_on_ARKEV = map_dbl(kelp_on_ARKEV, ~ if (length(.x) == 0) NA_real_ else as.numeric(.x[1])),
+    date = as.Date(paste(year, month, day, sep = "-"))) %>%
+  filter(!is.na(kelp_on_ARKEV)) %>%
+  mutate(year = as.character(year))
 View(kelp_on_ARKEV_clean)
+
 ```
 
-#Number of spliced sporophytes on ARKEVS
+#Total number of spliced sporophytes on ARKEVS
 ```{r}
 num_kelp_on <- kelp_on_ARKEV_clean %>%
-  group_by(year, month) %>%
-  mutate(total_num = sum(kelp_on_ARKEV))
+  mutate(month_day = as.Date(paste(2024, month, day, sep = "-"))) %>% # pick any reference year
+  group_by(year, month_day) %>%
+  distinct(year, month_day, ARKEV_unit, .keep_all = TRUE) %>%
+  group_by(year, month_day) %>%
+  mutate(total = sum(kelp_on_ARKEV))
+View(num_kelp_on)
+
+View(num_kelp_on)
 ```
 
-
 ```{r}
-ggplot(num_kelp_on, aes(x = month, y = total_num, color = year, group = year)) +
+ggplot(num_kelp_on, aes(x = month_day, y = total, color = year, group = year)) +
   geom_point(size=2.5) +
   geom_line(size=1) +
-    scale_x_date(
-    date_breaks = "1 month",        # one tick per month
-    date_labels = "%b"              # short month names: Jan, Feb, Mar
-  ) +
   scale_y_continuous(
     limits = c(0, NA)  # starts at 0, automatic upper limit
   ) +
   labs(title = "Total Number of Spliced Sporophytes on ARKEVs", x = "Month", 
        y = "# Spliced Individuals", 
-       color = "Site") +
+       color = "Year") +
   theme_bw() +
   theme(
     axis.text.x = element_text(size = 15, face = "bold"),
@@ -58,8 +60,52 @@ ggplot(num_kelp_on, aes(x = month, y = total_num, color = year, group = year)) +
     axis.title.x = element_text(size = 15, face = "bold"),
     axis.title.y = element_text(size = 15, face = "bold"),
     title = element_text(size = 15, face = "bold"),
-    legend.title = element_blank(),
-    legend.text = element_blank()
+    legend.title  = element_text(size = 15, face = "bold"),
+    legend.text  = element_text(size = 15, face = "bold")
+  )
+```
+#Growth of spliced sporophytes
+```{r}
+growth <- kelp_on_ARKEV_clean %>%
+  filter(!is.na(stipe_length)) %>%
+    filter(!is.na(days_since_outplanting)) %>%
+    mutate(month_day = as.Date(paste(2024, month, day, sep = "-"))) %>% # pick any reference year
+   group_by(year, month_day) %>%
+  distinct(year, month_day,ARKEV_unit, .keep_all = TRUE) %>%
+  group_by(year, month_day) %>%
+ summarise(
+    mean_stipe_length = mean(stipe_length, na.rm = TRUE),
+    se_stipe_length = sd(stipe_length, na.rm = TRUE) / sqrt(n()),
+    sd_stipe_length = sd(stipe_length, na.rm =TRUE),
+    .groups = "drop"
+  )
+View(growth)
+```
+
+```{r}
+ggplot(growth, aes(x = month_day, y = mean_stipe_length, color = year, group = year)) +
+  geom_point(size=2.5) +
+  geom_line(size=1) +
+  geom_errorbar(
+    aes(ymin = mean_stipe_length - se_stipe_length, ymax = mean_stipe_length + se_stipe_length),
+    position = position_dodge(width = 0.9),
+    width = 0.3
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA)  # starts at 0, automatic upper limit
+  ) +
+  labs(title = "Growth of Spliced Sporophytes", x = "Month", 
+       y = "Mean Stipe Length(cm)", 
+       color = "Year") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    title = element_text(size = 15, face = "bold"),
+    legend.title  = element_text(size = 15, face = "bold"),
+    legend.text  = element_text(size = 15, face = "bold")
   )
 ```
 
