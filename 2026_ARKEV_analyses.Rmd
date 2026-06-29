@@ -813,10 +813,13 @@ map_8 <- map_5 %>%
   filter(plot <= 10) %>%
   assign_cardinal() 
 
-#averaging acorss dates
-map_9 <- map_8
+#selecting for 5/25 date
+map_9 <- map_8 %>%
+  filter(format(date, "%Y-%m-%d") == "2026-05-25")
+  
 
 ```
+
 ```{r}
 #big river
 tornado_df <- map_7 %>%
@@ -897,5 +900,159 @@ fig_e
 fig_f
 fig_g
 #moved 8, 9, 10 just do 1-7, then average spring 2025 and compare to spring 2026
+```
+
+#noyo urchin figs
+```{r}
+#selecting for just urchins
+noyo_525 <- build_3 %>%
+  filter(site == "noyo", date == "2026-05-25") %>%
+  mutate(
+    purple_urchins = purple_urchins_small + purple_urchins_large,
+    area_m2 = pi * 1^2,
+    purple_urchins_density = purple_urchins / area_m2,
+    red_urchins_density = red_urchins / area_m2) %>%
+  select(year, month, day, date, site, arkev_unit, arkev_type,
+         purple_urchins_small, purple_urchins_large, purple_urchins, red_urchins,
+         purple_urchins_density, red_urchins_density)
+
+noyo_525_summary <- noyo_525 %>%
+  group_by(date, site, arkev_type) %>%
+  summarize(
+    mean_purple_density = mean(purple_urchins_density),
+    se_purple_density = sd(purple_urchins_density) / sqrt(n()),
+    mean_red_density = mean(red_urchins_density),
+    se_red_density = sd(red_urchins_density) / sqrt(n()),
+    n = n())
+
+plot_data <- noyo_525_summary %>%
+  pivot_longer(
+    cols = c(mean_purple_density, mean_red_density, se_purple_density, se_red_density),
+    names_to = c("metric", "species"),
+    names_pattern = "(mean|se)_(purple|red)_density"
+  ) %>%
+  pivot_wider(names_from = metric, values_from = value)
+
+fig_h <- ggplot(plot_data, aes(x = species, y = mean, fill = species)) +
+  geom_col(width = 0.6, color = "black") +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2) +
+  scale_fill_manual(values = c("purple" = "purple4", "red" = "firebrick3")) +
+  labs(
+    x = "Species",
+    y = expression(Mean~density~(individuals~per~m^2)),
+    title = "Urchin density at Noyo (2026-05-25)"
+  ) +
+  theme_classic() +
+  theme(legend.position = "none") + 
+  scale_y_continuous(expand = c(0, 0))
+
+fig_h
+
+#purps with size 
+noyo_525_size <- build_3 %>%
+  filter(site == "noyo", date == "2026-05-25") %>%
+  mutate(area_m2 = pi * 1^2,
+    purple_urchins_small_density = purple_urchins_small / area_m2,
+    purple_urchins_large_density = purple_urchins_large / area_m2,
+    red_urchins_density = red_urchins / area_m2) %>%
+  select(year, month, day, date, site, arkev_unit, arkev_type,
+         purple_urchins_small, purple_urchins_large, red_urchins,
+         purple_urchins_small_density, purple_urchins_large_density, red_urchins_density)
+
+noyo_525_summary_size <- noyo_525_size %>%
+  group_by(date, site, arkev_type) %>%
+  summarize(
+    mean_purple_large_density = mean(purple_urchins_large_density),
+    se_purple_large_density = sd(purple_urchins_large_density) / sqrt(n()),
+    mean_purple_small_density = mean(purple_urchins_small_density),
+    se_purple_small_density = sd(purple_urchins_small_density) / sqrt(n()),
+    mean_red_density = mean(red_urchins_density),
+    se_red_density = sd(red_urchins_density) / sqrt(n()),
+    n = n())
+
+plot_data_2 <- noyo_525_summary_size %>%
+  pivot_longer(
+    cols = c(mean_purple_large_density, se_purple_large_density, mean_red_density, mean_purple_small_density, se_purple_small_density, se_red_density),
+    names_to = c("metric", "species"),
+    names_pattern = "(mean|se)_(purple_large|purple_small|red)_density"
+  ) %>%
+  pivot_wider(names_from = metric, values_from = value)
+
+fig_i <- ggplot(plot_data_2, aes(x = species, y = mean, fill = species)) +
+  geom_col(width = 0.6, color = "black") +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2) +
+  scale_fill_manual(values = c("purple_large" = "purple4","purple_small" ="lavender",  "red" = "firebrick3")) +
+  labs(
+    x = "Species",
+    y = expression(Mean~density~(individuals~per~m^2)),
+    title = "Urchin density at Noyo (2026-05-25)"
+  ) +
+  theme_classic() +
+  theme(legend.position = "none") + 
+  scale_y_continuous(expand = c(0, 0))
+
+fig_i
+
+#urchins over time
+noyo_1 <- build_3 %>%
+  filter(site == "noyo")
+
+
+noyo_2 <- noyo_1 %>%
+  mutate(
+    purple_urchins = purple_urchins_small + purple_urchins_large,
+    area_m2 = pi * 1^2,
+    purple_urchins_density = purple_urchins / area_m2,
+    red_urchins_density = red_urchins / area_m2) %>%
+  select(year, month, day, date, site, arkev_unit, arkev_type,
+         purple_urchins_small, purple_urchins_large, purple_urchins, red_urchins,
+         purple_urchins_density, red_urchins_density)
+
+noyo_3 <- noyo_2 %>%
+  group_by(date, site) %>%
+  summarize(
+    mean_purple_density = mean(purple_urchins_density),
+    se_purple_density = sd(purple_urchins_density) / sqrt(n()),
+    mean_red_density = mean(red_urchins_density),
+    se_red_density = sd(red_urchins_density) / sqrt(n()),
+    n = n(),
+    .groups = "drop")
+
+plot_data_3 <- noyo_3 %>%
+  pivot_longer(
+    cols = c(mean_purple_density, mean_red_density, se_purple_density, se_red_density),
+    names_to = c("metric", "species"),
+    names_pattern = "(mean|se)_(purple|red)_density"
+  ) %>%
+  pivot_wider(names_from = metric, values_from = value) %>%
+  ungroup() %>%
+  mutate(date = as.Date(date)) %>%
+  mutate(date_factor = factor(date, labels = c("May 6", "May 25")))
+  
+
+fig_j <- ggplot(plot_data_3, aes(x = date_factor, y = mean, color = species, shape = species, linetype = species)) +
+  geom_line(aes(group = species), linewidth = 1, position = position_dodge(width = 0.15)) +
+  geom_point(size = 3, position = position_dodge(width = 0.15)) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.1, linewidth = 0.8,
+                position = position_dodge(width = 0.15)) +
+  scale_color_manual(values = c("purple" = "#6A3D9A", "red" = "#B2182B")) +
+  labs(
+    x = "Date",
+    y = expression(Mean~density~(individuals~m^-2)),
+    title = "Urchin density at Noyo over May 2026",
+    color = "Species",
+    shape = "Species",
+    linetype = "Species") +
+  theme_classic(base_size = 13) +
+  theme(
+    text = element_text(family = "serif"),
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.line = element_line(linewidth = 0.4),
+    axis.ticks = element_line(linewidth = 0.4),
+    panel.grid = element_blank()) + 
+  scale_x_discrete(expand = expansion(add = 0.3))
+
+fig_j
 ```
 
