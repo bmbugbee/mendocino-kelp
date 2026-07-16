@@ -1,0 +1,134 @@
+---
+title: "2026_Drift_Enhancement_Analyses"
+author: "Sabrina Grant"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list=ls())
+librarian::shelf(tidyverse, ggplot2, googlesheets4, janitor)
+```
+#Kelp on Grazer Assay Bars 
+```{r}
+#importing google sheets 
+GA_kelp_weights = 
+"https://docs.google.com/spreadsheets/d/1d1CjDTCh7g108fjLrHlKTLF5tQDqrwpcJNINKTru3uI/edit?gid=0#gid=0"
+
+kelp_on_GA <- read_sheet(GA_kelp_weights, sheet = "Sheet1")
+```
+```{r}
+#averaging mean weight 
+build_1 <- kelp_on_GA %>%
+  janitor::clean_names() %>%
+  group_by(date, site, plot, id, arkev, drift, time) %>%
+  summarise(mean_weight_g = mean(weight_g))
+
+#adding in plots from post time that had no kelp 
+# get the unique site/plot/id/arkev/drift combos surveyed in pre
+pre_combos <- build_1 %>%
+  filter(time == "Pre") %>%
+  distinct(site, plot, id, arkev, drift)
+
+# find which of those combos never show up in post
+missing_post <- pre_combos %>%
+  anti_join(build_1 %>% filter(time == "Post"), by = c("site", "plot", "id", "arkev"))
+
+# build the zero-weight rows for those missing plots
+zero_rows <- missing_post %>%
+  mutate(
+    date = as.Date("2026-07-14"), # post survey date
+    time = "Post",
+    mean_weight_g = 0)
+
+# bind back into the main df
+build_2 <- bind_rows(build_1, zero_rows) %>%
+  arrange(plot, id, arkev, time)
+
+build_3 <- build_2 %>%
+  group_by(arkev, drift, time) %>%
+  mutate(treatment = paste(arkev, drift, sep = "_")) %>%
+  group_by(treatment, time) %>%
+  summarise(
+    mean_weight = mean(mean_weight_g),
+    se_weight = sd(mean_weight_g) / sqrt(n()),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(time = factor(time, levels = c("Pre", "Post"))) # keep pre before post
+
+#renaming treatments
+label_lookup <- c(
+  "ARKEV_drift"      = "ARKEV + Drift",
+  "ARKEV_no_drift"   = "ARKEV + No Drift",
+  "Control_drift"    = "Control + Drift",
+  "Control_no_drift" = "Control + No Drift")
+
+build_3 <- build_3 %>%
+  mutate(treatment_label = recode(treatment, !!!label_lookup))
+
+ggplot(build_3, aes(x = treatment_label, y = mean_weight, fill = time)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7, color = "black") +
+  geom_errorbar(
+    aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
+    position = position_dodge(width = 0.8), width = 0.2
+  ) +
+  scale_fill_manual(values = c("Pre" = "gray80", "Post" = "gray30")) +
+  labs(
+    x = "Treatment",
+    y = "Mean kelp weight (g)",
+    fill = "Deployment Period"
+  ) +
+  theme_classic(base_family = "serif") +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5)) + 
+  scale_y_continuous(expand = c(0, 0))
+
+```
+```{r}
+build_4 <- build_2 %>%
+  ungroup() %>%
+  select(-date)
+
+build_5 <- build_4 %>%
+  mutate(treatment = paste(arkev, drift, sep = "_")) %>%
+  select(plot, id, treatment, time, mean_weight_g) %>%
+  pivot_wider(names_from = time, values_from = mean_weight_g) %>%
+  mutate(pct_change = ((Post - Pre) / Pre) * 100)
+
+build_6 <- build_5 %>%
+  group_by(treatment) %>%
+  summarise(
+    mean_pct_change = mean(pct_change),
+    se_pct_change = sd(pct_change) / sqrt(n()),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(treatment_label = recode(treatment, !!!label_lookup))
+
+build_7 <- build_6 %>%
+   mutate(drift = ifelse(grepl("no_drift", treatment), "no_drift", "drift"))
+
+ggplot(build_7, aes(x = treatment_label, y = mean_pct_change, fill = drift)) +
+  geom_col(color = "black", width = 0.6) +
+  geom_errorbar(
+    aes(ymin = mean_pct_change - se_pct_change, ymax = mean_pct_change + se_pct_change),
+    width = 0.2
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("drift" = "#6E8B3D", "no_drift" = "grey")) +
+  labs(
+    title = "Effects of drift enhancement on kelp biomass of GA bars",
+    subtitle = "% change in kelp weight (g) before and after drift deployment (24hrs)",
+    x = "Treatment",
+    y = "% change",
+    fill = "Treatment Type" ) +
+  theme_classic(base_family = "serif") +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5))
+```
+
+
+
