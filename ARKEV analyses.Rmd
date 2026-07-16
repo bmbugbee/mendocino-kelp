@@ -2511,7 +2511,7 @@ ggplot(site_scores_9, aes(x = NMDS1, y = NMDS2)) +
   )
 ```
 
-<<<<<<< HEAD
+
 =======
 #2024 vs 2025
 ```{r}
@@ -2875,7 +2875,7 @@ ggplot(month_centroids, aes(NMDS1, NMDS2)) +
 
 ```
 
->>>>>>> 2498d9ab43915c538e018bab39c49e6dd32e8001
+
 #Algal cover data 
 ```{r}
 cover_data <- doc_MASTER %>%
