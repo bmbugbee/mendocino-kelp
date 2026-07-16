@@ -18,7 +18,14 @@ library(forcats)
 #df
 ```{r}
 #load kelp on arkev data
-koa_master = read_sheet("https://docs.google.com/spreadsheets/d/1Xk0a_PX9X-BuZQ9ZkRx0DFtRe8qcjAYHlaMz7DiH1ws/edit?gid=0#gid=0")
+koa_master = read_sheet("https://docs.google.com/spreadsheets/d/1Xk0a_PX9X-BuZQ9ZkRx0DFtRe8qcjAYHlaMz7DiH1ws/edit?gid=0#gid=0") %>%
+ filter(!is.na(kelp_on_ARKEV)) |>
+  mutate(stipe_length = as.numeric(stipe_length),
+         kelp_on_ARKEV = as.numeric(kelp_on_ARKEV),
+         reproductive_kelp_on_ARKEV = as.numeric(reproductive_kelp_on_ARKEV),
+         blade_number = as.numeric(blade_number),
+         reproductive_blade_number = as.numeric(reproductive_blade_number),
+         days_since_outplanting = as.numeric(days_since_outplanting))
 str(koa_master)
 ```
 
@@ -129,11 +136,19 @@ stipe_noyo = koa_master %>%
   mutate(avg_length = mean(stipe_length),
             se = sd(stipe_length)/sqrt(length(stipe_length)),
          max = max(stipe_length)) |>
+  group_by(date) %>%
+  mutate(avg_length = mean(stipe_length),
+            se_length = sd(stipe_length)/sqrt(length(stipe_length)),
+         max_length = max(stipe_length)) %>%
 group_by(date, ARKEV_type) |>
   mutate(avg_length_type = mean(stipe_length),
             se_type = sd(stipe_length)/sqrt(length(stipe_length)),
-         max_type = max(stipe_length))
+         max_type = max(stipe_length)) 
+  
 ```
+
+```{r}
+
 
 
 ```{r}

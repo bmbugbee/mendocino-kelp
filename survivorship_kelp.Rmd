@@ -6,12 +6,15 @@ date: "2025-10-20"
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr) 
 ```
 
-##Big River Survivorship
-
 ```{r}
-noyo_kelp <- read.csv("Noyo kelp on ARKEV.csv") |>
+noyo_kelp <- read_sheet("https://docs.google.com/spreadsheets/d/15VQ4LNt9-319UO0C1MFzv_K2XmGeYXjLD0d7JmLxxEU/edit?gid=0#gid=0") |>
   mutate(site = "Noyo") |>
   rename(stipe_length = stipe_length_cm) |>
   mutate(stipe_length = as.numeric(stipe_length))
@@ -20,10 +23,16 @@ noyo_kelp <- read.csv("Noyo kelp on ARKEV.csv") |>
 
 
 ```{r cars}
-br_kelp <- read_csv("BR kelp on ARKEV.csv") |>
-    mutate(site = "Big River") |>
+br_kelp <- read_sheet("https://docs.google.com/spreadsheets/d/1srKfto1CpjAfJav2ofoTxPsC_3MmxAIfdA7utfCT5p0/edit?gid=0#gid=0") %>%
+mutate(site = "Big River") |>
   filter(!is.na(kelp_on_ARKEV)) |>
-  mutate(stipe_length = as.numeric(stipe_length))
+  mutate(stipe_length = as.numeric(stipe_length),
+         kelp_on_ARKEV = as.numeric(kelp_on_ARKEV),
+         reproductive_kelp_on_ARKEV = as.numeric(reproductive_kelp_on_ARKEV),
+         blade_number = as.numeric(blade_number),
+         reproductive_blade_number = as.numeric(reproductive_blade_number),
+         days_since_outplanting = as.numeric(days_since_outplanting))
+str(br_kelp)
 
 ```
 
@@ -31,8 +40,8 @@ br_kelp <- read_csv("BR kelp on ARKEV.csv") |>
 br_clean <- br_kelp |>
   mutate(date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d"))|>
   distinct(site, date, ARKEV_unit, .keep_all = TRUE) |>
-  group_by(site, date) |>
-  mutate(total = sum(kelp_on_ARKEV))
+  group_by(date, site) |>
+  mutate(total = sum(kelp_on_ARKEV, na.rm = TRUE))
 
 ```
 
@@ -70,8 +79,15 @@ ggplot(br_clean, aes(x = date, y = total, color = site, group = site)) +
 
 
 ```{r}
-full_kelp <- bind_rows(noyo_kelp, br_kelp)
-  view(full_kelp)
+full_kelp = read_sheet("https://docs.google.com/spreadsheets/d/1neggPBLv4m3AwTWzQxNBIz0ALO0S8s-IIYeUeH502RU/edit?gid=0#gid=0") %>%
+   filter(!is.na(kelp_on_ARKEV)) |>
+  mutate(stipe_length = as.numeric(stipe_length),
+         kelp_on_ARKEV = as.numeric(kelp_on_ARKEV),
+         reproductive_kelp_on_ARKEV = as.numeric(reproductive_kelp_on_ARKEV),
+         blade_number = as.numeric(blade_number),
+         reproductive_blade_number = as.numeric(reproductive_blade_number),
+         days_since_outplanting = as.numeric(days_since_outplanting))
+str(full_kelp)
 ```
 
 ```{r}
@@ -80,14 +96,14 @@ full_clean <- full_kelp |>
   )|>
   distinct(site, date, ARKEV_unit, .keep_all = TRUE) |>
   group_by(site, date) |>
-  mutate(total = sum(kelp_on_ARKEV))
+  mutate(total = sum(kelp_on_ARKEV, na.rm = TRUE))
 ```
 
 
 
 
 ```{r}
-
+#PLOT BOTH SITES
 ggplot(full_clean, aes(x = date, y = total, color = site, group = site)) +
   geom_point(size=2.5) +
   geom_line(size=1) +
@@ -104,6 +120,7 @@ ggplot(full_clean, aes(x = date, y = total, color = site, group = site)) +
     y = "# Spliced Individuals",
     color = "Site"
   ) +
+  scale_color_manual(values=c("#CC6666", "#9999CC"))+
   theme_bw() +
   theme(
     axis.text.x = element_text(size = 15, face = "bold"),
@@ -218,19 +235,6 @@ ggplot(bydate_br, aes(x = date, y = mean, color = site, group = site)) +
     legend.position = "right"
   )
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

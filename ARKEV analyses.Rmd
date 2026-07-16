@@ -596,14 +596,14 @@ write.csv(br_estimate_transposed, "C:/Users/bmbug/OneDrive/Documents/MLML recove
 
 #Kelp biomass data
 ```{r}
-biomass = read_sheet("https://docs.google.com/spreadsheets/d/1heDRA0QEH3cwIhvrdjvF9p_Fdrphw9TvX3eAplhmBA8/edit?gid=0#gid=0")
+biomass = read_sheet("https://docs.google.com/spreadsheets/d/17-pjiXi3e52YEpnj5WyhM5IK9DjtKiVqnL2YJaOYYhU/edit?gid=0#gid=0")
 
 biomass <- biomass %>%
   mutate(
     Stipe_length = as.numeric(Stipe_length),
     Weight = as.numeric(Weight),
-    Total_blades = as.numeric(Total_Blades),
-    Reproductive_blades = as.numeric(Reproductive_Blades)
+    Total_blades = as.numeric(Total_blades),
+    Reproductive_blades = as.numeric(Reproductive_blades)
   )
 str(biomass)
 ```
@@ -833,6 +833,7 @@ treat_diff <- contrast(emm_effects, method = "revpairwise")  # control - ARKEV o
 treat_diff
 
 ```
+
 ##ARKEV vs. Control 
 ```{r}
 purp_by_type <- purps_data %>%
@@ -2998,6 +2999,7 @@ ggplot(first_last, aes(x = ARKEV_type,
   )  
 
 ```
+
 ```{r}
 change_table <- first_last %>%
   select(month, ARKEV_type, species_code, mean_cover, relative_cover) %>%
@@ -3125,7 +3127,7 @@ ggplot(fish_treat_summary,
   )
 
 fish_treat_summary$location <- factor(
-  fish_den_summary$location,
+  fish_treat_summary$location,
   levels = c("fish_on", "fish_off"))
 
 trt_loc_colors <- c(
@@ -3205,10 +3207,14 @@ treat_colors <- c(
 
 
 ggplot(fish_treat_summary, aes(x = treatment, y = mean_richness, fill = treatment)) +
-  geom_bar(stat = "identity", color = "black", width = 0.7) +
+  geom_bar(stat = "identity", color = "black", width = 0.7, position = position_dodge(width = 0.8)
+  ) +
   geom_errorbar(aes(ymin = mean_richness - se_richness,
                     ymax = mean_richness + se_richness),
-                width = 0.2) +
+                width = 0.2,
+                size = 0.7,
+                position = position_dodge(width = 0.8)
+  ) +
   geom_text(aes(label = Letter, y = mean_richness + se_richness + 0.2), size = 5) +
   scale_fill_manual(values = treat_colors) +
   theme_bw(base_size = 14) +
@@ -3217,6 +3223,8 @@ ggplot(fish_treat_summary, aes(x = treatment, y = mean_richness, fill = treatmen
     y = "Average Species Richness",
     fill = "Treatment"
   )
+
+
 ```
 
 ```{r}

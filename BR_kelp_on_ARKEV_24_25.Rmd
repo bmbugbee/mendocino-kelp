@@ -40,6 +40,10 @@ num_kelp_on <- kelp_on_ARKEV_clean %>%
   mutate(total = sum(kelp_on_ARKEV))
 View(num_kelp_on)
 
+<<<<<<< HEAD
+=======
+View(num_kelp_on)
+>>>>>>> dcec4e92f5b5b04041fa7a52eed08d24e8d1b32f
 ```
 
 ```{r}
@@ -63,6 +67,7 @@ ggplot(num_kelp_on, aes(x = month_day, y = total, color = year, group = year)) +
     legend.text  = element_text(size = 15, face = "bold")
   )
 ```
+<<<<<<< HEAD
 #Number of Spliced Sporophytes per ARKEV
 ```{r}
 num_kelp_on_avg <- kelp_on_ARKEV_clean %>%
@@ -96,6 +101,8 @@ ggplot(num_kelp_on_avg, aes(x = month_day, y = avg, color = year, group = year))
 ```
 
 
+=======
+>>>>>>> dcec4e92f5b5b04041fa7a52eed08d24e8d1b32f
 #Growth of spliced sporophytes
 ```{r}
 growth <- kelp_on_ARKEV_clean %>%
