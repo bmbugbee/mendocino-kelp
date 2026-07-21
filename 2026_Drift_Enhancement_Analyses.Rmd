@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 
 rm(list=ls())
-librarian::shelf(tidyverse, ggplot2, googlesheets4, janitor)
+librarian::shelf(tidyverse, ggplot2, googlesheets4, janitor, tidyr, dplyr, lubridate, purrr, readr)
 ```
 #Kelp on Grazer Assay Bars 
 ```{r}
@@ -129,6 +129,966 @@ ggplot(build_7, aes(x = treatment_label, y = mean_pct_change, fill = drift)) +
   theme(
     axis.text.x = element_text(angle = 0, hjust = 0.5))
 ```
+#Drift Surveys 
+```{r}
+drift_surveys_2026 = 'https://docs.google.com/spreadsheets/d/1_6FfkRoLTwMq54qiL4-9V68ELknBnJmNWHLyfnVYfSI/edit?gid=0#gid=0'
+
+br_drift_survey <- read_sheet(drift_surveys_2026, sheet = "drift_survey_data")
+
+deployment_info <- read_sheet(drift_surveys_2026, sheet = "big_river_deployment_location_info")
+
+#data QA/QC
+
+#define expected design 
+
+expected_date_time <- tribble(
+  ~date,        ~time,
+  "2026-07-13", "0_hrs",
+  "2026-07-14", "24_hrs"
+)
+ 
+#expected quadrats: N/E/S/W at 1m and 3m, plus GA at 0m = 9 quadrats per unit
+expected_quadrats <- bind_rows(
+  expand.grid(quadrat_ID = c("N", "E", "S", "W"), quadrat_distance = c("1m", "3m"), stringsAsFactors = FALSE),
+  data.frame(quadrat_ID = "GA", quadrat_distance = "0m", stringsAsFactors = FALSE))
+ 
+expected_plots <- 1:10
+
+
+#check 1: rows missing plot/arkev_unit/arkev_type assignment
+check_1 <- br_drift_survey %>%
+    filter(is.na(plot) | is.na(arkev_unit) | is.na(arkev_type))
+#^all good
+
+
+# check 2: each plot has exactly one arkev unit and one control unit,
+# per date x time point
+ 
+check_2 <- br_drift_survey %>%
+  filter(!is.na(plot)) %>%
+  distinct(date, time, plot, arkev_unit, arkev_type) %>%
+  count(date, time, plot, name = "n_units")
+#^all fixed
+
+#check 3
+check_3 <- expected_date_time %>%
+  pmap(function(date, time) {
+    present <- br_drift_survey %>%
+      filter(date == !!date, time == !!time, !is.na(plot)) %>%
+      distinct(plot) %>%
+      pull(plot)
+    missing <- setdiff(expected_plots, present)
+    if (length(missing) > 0) data.frame(date = date, time = time, missing_plot = missing) else NULL
+  }) %>%
+  bind_rows()
+ 
+#check 4: missing quadrats
+plot_units <- br_drift_survey %>%
+  filter(!is.na(plot)) %>%
+  distinct(plot, arkev_unit, arkev_type)
+ 
+expected_skeleton <- expected_date_time %>%
+  pmap(function(date, time) {
+    plot_units %>%
+      crossing(expected_quadrats) %>%
+      mutate(date = date, time = time)
+  }) %>%
+  bind_rows()
+ 
+check_4 <- expected_skeleton %>%
+mutate(date = ymd(date)) %>%
+  anti_join(br_drift_survey, by = c("date", "time", "plot", "arkev_unit", "arkev_type", "quadrat_ID", "quadrat_distance"))
+#all fixed
+
+
+#check 5: duplicate quadrats - same combo surveyed more than once
+check_5 <- br_drift_survey %>%
+  filter(!is.na(plot)) %>%
+  count(date, time, plot, arkev_unit, arkev_type, quadrat_ID, quadrat_distance, name = "n_rows") %>%
+  filter(n_rows > 1)
+
+
+#check 6: drift_treatment should be constant within a plot/unit/type group
+check_6 <- br_drift_survey %>%
+  filter(!is.na(plot)) %>%
+  group_by(date, time, plot, arkev_unit, arkev_type) %>%
+  filter(n_distinct(drift_treatment) > 1) %>%
+  distinct(date, time, plot, arkev_unit, arkev_type, drift_treatment) %>%
+  ungroup()
+```
+#urchin figs
+
+```{r}
+urchin_cols <- c(
+  "purple_urchins_<2cm",
+  "purple_urchins_>2cm",
+  "red_urchins_<8cm",
+  "red_urchins_>8cm"
+)
+
+
+# convert the urchin list-columns to numeric
+  # values such as "n/a", "NA", and blank cells become NA
+  # actual zeros remain zero
+
+urchin_clean <- br_drift_survey %>%
+  mutate(across(all_of(urchin_cols), ~ map_dbl(.x, function(value) {
+    if (length(value) == 0 || all(is.na(value))) {return(NA_real_)} # empty list element or missing value
+        value <- as.character(value[[1]]) # extract the value from the list element
+        value <- trimws(tolower(value)) # remove extra spaces and standardize capitalization
+        if (value %in% c("", "na", "n/a", "nan", "none")) {return(NA_real_)} # convert text representing missing data to NA
+        parse_number(value)}))) # convert valid values to numeric
 
 
 
+
+# create a safe mean function
+  #this calculates the mean using surveyed quadrats only.
+  #if every value in a group is NA, it returns NA instead of NaN.
+
+safe_mean <- function(x) {
+  if (all(is.na(x))) {NA_real_} else {mean(x, na.rm = TRUE)}}
+
+
+# assign the GA quadrat to 0 m and average densities
+  # N, E, S, and W are averaged at 1 m
+  # N, E, S, and W are averaged at 3 m
+  # GA is retained as the single observation at 0 m
+
+urchin_avg <- urchin_clean %>%
+  mutate(quadrat_distance = case_when(quadrat_ID == "GA" ~ "0m",TRUE ~ quadrat_distance)) %>%
+  group_by(site, date, plot, arkev_unit, arkev_type, drift_treatment, quadrat_distance) %>%
+  summarise(purple_small = safe_mean(`purple_urchins_<2cm`),
+            purple_large = safe_mean(`purple_urchins_>2cm`),
+            red_small    = safe_mean(`red_urchins_<8cm`),
+            red_large    = safe_mean(`red_urchins_>8cm`),
+            n_expected = n(), # number of quadrat rows in each group
+            n_surveyed = sum(!is.na(`purple_urchins_<2cm`) | # number of quadrats that were actually surveyed
+                               !is.na(`purple_urchins_>2cm`) |
+                               !is.na(`red_urchins_<8cm`) |
+                               !is.na(`red_urchins_>8cm`)), .groups = "drop") %>%
+  mutate(quadrat_distance = factor(quadrat_distance, levels = c("0m", "1m", "3m")))
+
+
+
+# check groups with missing surveys
+urchin_avg %>%
+  filter(n_surveyed < n_expected)
+
+urchin_long <- urchin_avg %>%
+  pivot_longer(cols = c(
+      purple_small,
+      purple_large,
+      red_small,
+      red_large),
+    names_to = "urchin_group",
+    values_to = "mean_density") %>%
+  mutate(urchin_group = factor(urchin_group,levels = c(
+        "purple_small",
+        "purple_large",
+        "red_small",
+        "red_large"),
+      labels = c(
+        "Purple urchins <2 cm",
+        "Purple urchins >2 cm",
+        "Red urchins <8 cm",
+        "Red urchins >8 cm")))
+
+# convert sampling dates to experimental time
+urchin_plot_data <- urchin_avg %>%
+  mutate(time = case_when(
+      date == as.Date("2026-07-13") ~ "hr_0",
+      date == as.Date("2026-07-14") ~ "hr_24",
+      TRUE ~ NA_character_),
+time = factor(time, levels = c("hr_0", "hr_24")),
+quadrat_distance = factor(
+      quadrat_distance,
+      levels = c("0m", "1m", "3m"),
+      labels = c("0 m", "1 m", "3 m")),
+drift_treatment = factor(
+      drift_treatment,
+      levels = c("no_drift", "drift"),
+      labels = c("No drift", "Drift"))) %>%
+  filter(!is.na(time))
+```
+
+#figs
+```{r}
+#Total density of all purples and reds, averaged across quads by distance, from day 1 to day 2 
+urchin_total <- urchin_plot_data %>%
+  mutate(
+    purple_total = purple_small + purple_large,
+    red_total = red_small + red_large) %>%
+  pivot_longer(
+    cols = c(purple_total, red_total),
+    names_to = "species",
+    values_to = "density") %>%
+  mutate(
+    species = factor(
+      species,
+      levels = c("purple_total", "red_total"),
+      labels = c("Purple urchins", "Red urchins")))
+
+ggplot(
+  urchin_total,
+  aes(
+    x = quadrat_distance,
+    y = density,
+    fill = drift_treatment
+  )
+) +
+  geom_boxplot(
+    position = position_dodge(0.8),
+    width = 0.65,
+    outlier.shape = NA
+  ) +
+  geom_jitter(
+    aes(color = drift_treatment),
+    position = position_jitterdodge(
+      jitter.width = 0.15,
+      dodge.width = 0.8
+    ),
+    alpha = 0.6,
+    size = 2
+  ) +
+  facet_grid(
+  species ~ time,
+  scales = "free_y"
+) +
+  scale_fill_manual(values = c(
+    "No drift" = "honeydew1",
+    "Drift" = "palegreen3"
+  )) +
+  scale_color_manual(values = c(
+    "No drift" = "honeydew1",
+    "Drift" = "palegreen3"
+  )) +
+  theme_classic(base_size = 14) +
+  labs(
+    x = "Distance",
+    y = expression("Density (ind. "*m^{-2}*")"),
+    fill = "",
+    color = ""
+  )
+```
+
+```{r}
+######################################
+
+time_zero <- urchin_total %>%
+  filter(time == "hr_0")
+
+ggplot(
+  time_zero,
+  aes(
+    x = drift_treatment,
+    y = density,
+    fill = drift_treatment
+  )
+) +
+  geom_boxplot(
+    width = 0.65,
+    outlier.shape = NA,
+    alpha = 0.8
+  ) +
+  geom_jitter(
+    aes(color = drift_treatment),
+    width = 0.15,
+    alpha = 0.6,
+    size = 2
+  ) +
+  facet_grid(
+    species ~ quadrat_distance,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_fill_manual(
+    values = c(
+      "No drift" = "honeydew1",
+      "Drift" = "palegreen3"
+    )
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "darkseagreen4",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Total Urchin Density by Species at Hour Zero",
+    x = "Treatment Type",
+    y = expression("Density (ind. " * m^{-2} * ")")
+  )
+
+######################################
+
+time_24 <- urchin_total %>%
+  filter(time == "hr_24")
+
+ggplot(
+  time_24,
+  aes(
+    x = drift_treatment,
+    y = density,
+    fill = drift_treatment
+  )
+) +
+  geom_boxplot(
+    width = 0.65,
+    outlier.shape = NA,
+    alpha = 0.8
+  ) +
+  geom_jitter(
+    aes(color = drift_treatment),
+    width = 0.15,
+    alpha = 0.6,
+    size = 2
+  ) +
+  facet_grid(
+    species ~ quadrat_distance,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_fill_manual(
+    values = c(
+      "No drift" = "honeydew1",
+      "Drift" = "palegreen3"
+    )
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "darkseagreen4",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Total Urchin Density by Species at Hour 24",
+    x = "Treatment Type",
+    y = expression("Density (ind. " * m^{-2} * ")")
+  )
+```
+
+```{r}
+######################################
+
+distance_0 <- urchin_total %>%
+  filter(quadrat_distance == "0 m")
+
+ggplot(
+  distance_0,
+  aes(
+    x = time,
+    y = density,
+    fill = time
+  )
+) +
+  geom_boxplot(
+    width = 0.65,
+    outlier.shape = NA,
+    alpha = 0.8
+  ) +
+  geom_jitter(
+    aes(color = time),
+    width = 0.15,
+    alpha = 0.6,
+    size = 2
+  ) +
+  facet_grid(
+    species ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_fill_manual(
+    values = c(
+      "hr_0" = "honeydew1",
+      "hr_24" = "palegreen3"
+    )
+  ) +
+  scale_color_manual(
+    values = c(
+      "hr_0" = "darkseagreen4",
+      "hr_24" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Total Urchin Density by Species at 0m from GA Bar",
+    x = "Treatment Type",
+    y = expression("Density (ind. " * m^{-2} * ")")
+  )
+```
+```{r}
+distance_0_summary <- distance_0 %>%
+  group_by(species, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  distance_0_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    species ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in total urchin density by species over 24 hour time period",
+    subtitle = "at 0m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
+```{r}
+distance_1 <- urchin_total %>%
+  filter(quadrat_distance == "1 m")
+
+distance_1_summary <- distance_1 %>%
+  group_by(species, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  distance_1_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    species ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in total urchin density by species over 24 hour time period",
+    subtitle = "at 1m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
+```{r}
+distance_3 <- urchin_total %>%
+  filter(quadrat_distance == "3 m")
+
+distance_3_summary <- distance_3 %>%
+  group_by(species, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  distance_3_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    species ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in total urchin density by species over 24 hour time period",
+    subtitle = "at 3m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
+
+```{r}
+purple_long <- urchin_plot_data %>%
+  pivot_longer(
+    cols = c(purple_small, purple_large),
+    names_to = "size",
+    values_to = "density"
+  ) %>%
+  mutate(
+    size = factor(
+      size,
+      levels = c("purple_small","purple_large"),
+      labels = c("Small (<2 cm)","Large (>2 cm)")
+    )
+  )
+
+ggplot(
+  purple_long,
+  aes(
+    quadrat_distance,
+    density,
+    fill = drift_treatment
+  )
+) +
+  geom_boxplot(
+    position = position_dodge(0.8),
+    width = .65,
+    outlier.shape = NA
+  ) +
+  geom_jitter(
+    aes(color = drift_treatment),
+    position = position_jitterdodge(
+      jitter.width = .15,
+      dodge.width = .8
+    ),
+    alpha = .6,
+    size = 2
+  ) +
+  facet_grid(size ~ time, scales = "free_y"
+) +
+  scale_fill_manual(values=c("No drift"="lavender","Drift"="purple3")) +
+  scale_color_manual(values=c("No drift"="lavender","Drift"="purple3")) +
+  theme_classic(base_size=14)
+```
+```{r}
+purp_distance_0 <- purple_long %>%
+  filter(quadrat_distance == "0 m")
+
+
+purp_distance_0_summary <- purp_distance_0 %>%
+  group_by(size, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  purp_distance_0_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    size ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in purple urchin density by size over 24 hour time period",
+    subtitle = "at 0m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
+```{r}
+purp_distance_1 <- purple_long %>%
+  filter(quadrat_distance == "1 m")
+
+
+purp_distance_1_summary <- purp_distance_1 %>%
+  group_by(size, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  purp_distance_1_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    size ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in purple urchin density by size over 24 hour time period",
+    subtitle = "at 1m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
+```{r}
+purp_distance_3 <- purple_long %>%
+  filter(quadrat_distance == "3 m")
+
+
+purp_distance_3_summary <- purp_distance_3 %>%
+  group_by(size, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  purp_distance_3_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    size ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in purple urchin density by size over 24 hour time period",
+    subtitle = "at 3m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
+```{r}
+red_long <- urchin_plot_data %>%
+  pivot_longer(
+    cols = c(red_small, red_large),
+    names_to = "size",
+    values_to = "density"
+  ) %>%
+  mutate(
+    size = factor(
+      size,
+      levels = c("red_small","red_large"),
+      labels = c("Sub-Legal (<8 cm)","Legal (>8 cm)")
+    )
+  )
+
+ggplot(
+  red_long,
+  aes(
+    quadrat_distance,
+    density,
+    fill = drift_treatment
+  )
+) +
+  geom_boxplot(
+    position = position_dodge(0.8),
+    width = .65,
+    outlier.shape = NA
+  ) +
+  geom_jitter(
+    aes(color = drift_treatment),
+    position = position_jitterdodge(
+      jitter.width = .15,
+      dodge.width = .8
+    ),
+    alpha = .6,
+    size = 2
+  ) +
+  facet_grid(size ~ time, scales = "free_y"
+)  +
+  scale_fill_manual(values=c("No drift"="brown1","Drift"="firebrick")) +
+  scale_color_manual(values=c("No drift"="brown1","Drift"="firebrick")) +
+  theme_classic(base_size=14)
+```
+
+```{r}
+red_distance_0 <- red_long %>%
+  filter(quadrat_distance == "0 m")
+
+
+red_distance_0_summary <- red_distance_0 %>%
+  group_by(size, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  red_distance_0_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    size ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in red urchin density by size over 24 hour time period",
+    subtitle = "at 0m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
+
+```{r}
+red_distance_1 <- red_long %>%
+  filter(quadrat_distance == "1 m")
+
+
+red_distance_1_summary <- red_distance_1 %>%
+  group_by(size, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  red_distance_1_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    size ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in red urchin density by size over 24 hour time period",
+    subtitle = "at 1m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
+
+```{r}
+red_distance_3 <- red_long %>%
+  filter(quadrat_distance == "3 m")
+
+
+red_distance_3_summary <- red_distance_3 %>%
+  group_by(size, drift_treatment, time) %>%
+  summarise(
+    mean_density = mean(density, na.rm = TRUE),
+    sd = sd(density, na.rm = TRUE),
+    se = sd(density, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+ggplot(
+  red_distance_3_summary,
+  aes(
+    x = time,
+    y = mean_density,
+    color = drift_treatment,
+    group = drift_treatment
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(
+      ymin = mean_density - sd,
+      ymax = mean_density + sd
+    ),
+    width = 0.1
+  ) +
+  facet_grid(
+    size ~ drift_treatment,
+    scales = "free_y",
+    labeller = label_value
+  ) +
+  scale_color_manual(
+    values = c(
+      "No drift" = "firebrick",
+      "Drift" = "darkgreen"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Change in red urchin density by size over 24 hour time period",
+    subtitle = "at 3m from GA Bar",
+    x = "Time",
+    y = expression("Density (ind. " * m^{-2} * ") ± SD")
+  )
+```
