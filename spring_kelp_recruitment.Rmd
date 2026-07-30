@@ -32,7 +32,7 @@ big_river_early_april_recruitment = read_sheet('https://docs.google.com/spreadsh
 #APRIL 4th
 ```{r}
 big_river_early_april_recruitment <-  big_river_early_april_recruitment%>%
-  filter(site == "Big River") %>%
+  filter(Site == "Big River") %>%
   clean_names()
 
 #changing count columns from factor to numeric
@@ -609,8 +609,86 @@ ggplot(totals_long, aes(x = factor(plot), y = species, fill = count)) +
     axis.text = element_text(color = "gray30"),
     plot.title = element_text(face = "bold"),
     plot.subtitle = element_text(color = "gray50"))
+```
+
+```{r}
+#both species only plots 1-7
+heatmap_long_2026 = heatmap_long %>%
+  filter(plot<=7)
+
+ggplot(heatmap_long_2026, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:7)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-05-05",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+#totals
+
+species_long <- heatmap_long_2026 %>%
+  filter(species != "Total")
+
+ggplot(species_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:7)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-05-05",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
+
+#totals
+
+totals_long <- heatmap_long_2026 %>%
+  filter(species == "Total")
+
+
+ggplot(totals_long, aes(x = factor(plot), y = species, fill = count)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  facet_wrap(~ N_S, ncol = 1) +
+  scale_fill_gradient(low = "#eef5e0", high = "#1a6e2e",
+                      name = "Count") +
+  scale_x_discrete(limits = as.character(1:7)) +
+  labs(
+    title = "Big River Restoration Site: Species Counts by Plot",
+    subtitle = "Summed across all transect bins | 2026-05-05",
+    x = "ARKEV Plot (West → East)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "gray30"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50"))
 
 ```
+
 ```{r}
 #base theme
 heatmap_theme <- function() {
@@ -1075,6 +1153,109 @@ d_fig3 <- treatment_density %>%
   scale_y_continuous(expand = c(0, 0))
 
 d_fig3
+```
+
+
+```{r}
+#2026 ARKEV plots only
+
+all_raw_2026 = all_raw %>%
+  filter(plot<8)
+
+#summarize to total counts 
+treatment_totals_2026 <- all_raw_2026 %>%
+  pivot_longer(cols = c(Total_All, LAMR, NERJ),
+               names_to = "species",
+               values_to = "count") %>%
+  group_by(date, ARKEV, species) %>%
+  summarise(
+    total = sum(count, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(species = recode(species, "Total_All" = "All Recruits"))
+
+#figure 1: All Recruits
+t_fig1_b <- treatment_totals_2026 %>%
+  filter(species == "All Recruits") %>%
+  ggplot(aes(x = ARKEV, y = total, fill = ARKEV)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.8, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "Control" = "#a8c8a0")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Total Recruitment | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Total Count",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  )+ 
+  scale_y_continuous(expand = c(0, 0))
+
+t_fig1_b
+
+#figure 2: NERJ only 
+t_fig2_b <- treatment_totals_2026 %>%
+  filter(species == "NERJ") %>%
+  ggplot(aes(x = ARKEV, y = total, fill = ARKEV)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.6, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("ARKEV" = "#1a6e2e", "Control" = "#a8c8a0")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Nereocystis juveniles | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Total Count",
+    fill = "Treatment"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  )+ 
+  scale_y_continuous(expand = c(0, 0))
+
+t_fig2_b
+
+#figure 3: LAMR and NERJ side by side
+t_fig3_b <- treatment_totals_2026 %>%
+  filter(species %in% c("LAMR", "NERJ")) %>%
+  mutate(species = factor(species, levels = c("LAMR", "NERJ"))) %>%
+  ggplot(aes(x = ARKEV, y = total, fill = species)) +
+  geom_col(position = position_dodge(width = 0.6), width = 0.6, color = "black") +
+  facet_wrap(~ date, ncol = 3) +
+  scale_fill_manual(values = c("LAMR" = "brown4", "NERJ" = "green4")) +
+  labs(
+    title = "Big River Restoration Site: ARKEV vs. Control",
+    subtitle = "Laminariales spp. recruits & Nereocystis juveniles | 04/04/2026, 04/19/2026, 05/05/2026",
+    x = NULL,
+    y = "Total Count",
+    fill = "Species"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black", face = "bold"),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray50")
+  ) + 
+  scale_y_continuous(expand = c(0, 0))
+
+t_fig3_b
+
 ```
 
 #2025 vs 2026 kelp recruitment
