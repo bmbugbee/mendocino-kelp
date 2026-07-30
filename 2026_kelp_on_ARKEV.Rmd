@@ -1,0 +1,23 @@
+---
+title: "kelp_on_arkev"
+output: html_document
+date: "2026-07-29"
+---
+
+
+
+```{r}
+#installing packages
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr)
+library(ggplot2)
+```
+
+```{r}
+#import data 
+ARKEV_26 = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=771488326#gid=771488326')
+                     
+``` 
