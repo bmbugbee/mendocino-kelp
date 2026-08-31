@@ -14,10 +14,1207 @@ library(lubridate)
 library(googlesheets4)
 library(purrr)
 library(ggplot2)
+library(stringr)
+library(forcats)
 ```
 
 ```{r}
 #import data 
-ARKEV_26 = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=771488326#gid=771488326')
-                     
-``` 
+koa_master = range_read(('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=771488326#gid=771488326'), sheet= 4)  %>%
+ mutate(
+    across(
+      c(days_since_outplanting, 
+        kelp_on_ARKEV, 
+        starts_with("stipe_length_")
+        ), ~ as.numeric(na_if(as.character(.), "ND"))
+    )
+  )
+
+str(koa_master)
+```
+
+#KELP ON ARKEV FOR BOTH SITES
+```{r}
+koa_both_sites <- koa_master %>%
+  mutate(
+    date = as.Date(
+      paste(year, month, day, sep = "-"),
+      format = "%Y-%m-%d"
+    )
+  ) %>%
+  filter(
+    site %in% c("noyo", "big river"),
+    !is.na(kelp_on_ARKEV),
+    !is.na(date),
+    !is.na(site),
+    !is.na(ARKEV_type),
+    !is.na(ARKEV_unit)
+  ) %>%
+  distinct(date, site, ARKEV_unit, .keep_all = TRUE) %>%
+  mutate(
+    plot = str_extract(ARKEV_unit, "\\d+"),
+    ARKEV_type = fct_relevel(
+      ARKEV_type,
+      "PVC",
+      "WOOD"
+    )
+  ) %>%
+  
+  # Total kelp across ARKEVs within each site/date
+  group_by(site, date) %>%
+  mutate(
+    total = sum(kelp_on_ARKEV, na.rm = TRUE)
+  ) %>%
+  
+  # Summary statistics within each site/date/ARKEV type
+  group_by(site, date, ARKEV_type) %>%
+  mutate(
+    total_type = sum(kelp_on_ARKEV, na.rm = TRUE),
+    mean = mean(kelp_on_ARKEV, na.rm = TRUE),
+    se = sd(kelp_on_ARKEV, na.rm = TRUE) /
+      sqrt(sum(!is.na(kelp_on_ARKEV)))
+  ) %>%
+  ungroup()
+
+```
+
+
+```{r}
+ggplot(koa_both_sites,
+       aes(x = date, y = mean, color = site, linetype = ARKEV_type, group = interaction(site, ARKEV_type))) +
+  geom_point(size = 2.5) +
+  geom_line(linewidth = 1) + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 1.5) +
+  scale_linetype_manual(
+    values = c(
+      "PVC" = "solid",
+      "WOOD" = "dashed")) +
+   scale_color_manual(
+    values = c(
+      "big river" = "#E69F00", 
+      "noyo" = "#0072B2"        
+      )) +
+  labs(
+    title = "Number of Spliced Sporophytes per ARKEV",
+    x = "Month",
+    y = "Total # Spliced Individuals",
+    color = "Site",
+    linetype = "ARKEV Type"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+
+```
+#survivorship analyses by ARKEV type among sites
+#noyo
+```{r}
+kelp_noyo <- koa_both_sites %>%
+  filter(site == "noyo")
+
+kelp_survival_noyo <- kelp_noyo %>%
+  mutate(
+    date = as.Date(
+      paste(year, month, day, sep = "-"),
+      format = "%Y-%m-%d"
+    ),
+    date = factor(date)
+  ) %>%
+  filter(
+    !is.na(kelp_on_ARKEV),
+    !is.na(ARKEV_unit),
+    !is.na(ARKEV_type)
+  ) 
+  
+```
+
+```{r}
+library(lme4)
+library(lmerTest)
+library(emmeans)
+
+kelp_model_noyo <- lmer(
+  kelp_on_ARKEV ~ ARKEV_type * date + (1 | ARKEV_unit),
+  data = kelp_survival_noyo,
+  REML = TRUE
+)
+
+anova(kelp_model_noyo)
+emmeans(kelp_model_noyo, pairwise ~ ARKEV_type | date)
+```
+
+```{r}
+plot(kelp_model_noyo)
+qqnorm(residuals(kelp_model_noyo))
+qqline(residuals(kelp_model_noyo))
+```
+
+
+```{r}
+#number of ARKEVs that retain kelp by type
+baseline_noyo <- kelp_noyo %>%
+  mutate(
+    date = as.Date(
+      paste(year, month, day, sep = "-"),
+      format = "%Y-%m-%d"
+    )
+  ) %>%
+  filter(!is.na(kelp_on_ARKEV)) %>%
+  arrange(ARKEV_unit, date) %>%
+  group_by(ARKEV_unit) %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(
+    ARKEV_unit,
+    baseline_date = date,
+    baseline_kelp = kelp_on_ARKEV
+  )
+
+kelp_survival_noyo <- kelp_noyo %>%
+  mutate(
+    date = as.Date(
+      paste(year, month, day, sep = "-"),
+      format = "%Y-%m-%d"
+    )
+  ) %>%
+  filter(
+    !is.na(kelp_on_ARKEV),
+    !is.na(ARKEV_unit),
+    !is.na(ARKEV_type)
+  ) %>%
+  left_join(
+    baseline_noyo,
+    by = "ARKEV_unit"
+  )
+```
+
+```{r}
+ARKEV_survival_noyo <- kelp_survival_noyo %>%
+  arrange(ARKEV_unit, date) %>%
+  group_by(ARKEV_unit) %>%
+  mutate(
+    kelp_lost = as.integer(
+      baseline_kelp > 0 &
+      cumsum(kelp_on_ARKEV == 0) > 0
+    )
+  ) %>%
+  ungroup()
+
+ARKEV_survival_noyo %>%
+  filter(date == baseline_date) %>%
+  select(
+    ARKEV_unit,
+    ARKEV_type,
+    baseline_date,
+    baseline_kelp,
+    kelp_on_ARKEV
+  )
+
+ARKEV_survival_noyo %>%
+  filter(date == baseline_date) %>%
+  summarise(
+    n_ARKEV = n(),
+    n_mismatch = sum(baseline_kelp != kelp_on_ARKEV)
+  )
+
+```
+
+```{r}
+kelp_survival_noyo <- kelp_survival_noyo %>%
+  mutate(
+    kelp_lost = ifelse(
+      baseline_kelp > 0 & kelp_on_ARKEV == 0, 1, 0))
+
+kelp_survival_noyo_summary <- kelp_survival_noyo %>%
+  group_by(date, ARKEV_type) %>%
+  summarise(
+    n_ARKEV = n(),
+    n_lost = sum(kelp_lost),
+    n_retained = sum(kelp_lost == 0),
+    percent_lost = 100 * n_lost / n_ARKEV,
+    percent_retained = 100 * n_retained / n_ARKEV,
+    .groups = "drop"
+  )
+
+kelp_survival_noyo_summary
+```
+
+```{r}
+survival_tests_noyo <- kelp_survival_noyo %>%
+  filter(date > as.Date("2026-04-18")) %>%
+  group_by(date) %>%
+  summarise(
+    p_value = fisher.test(
+      table(ARKEV_type, kelp_lost)
+    )$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adjusted = p.adjust(p_value, method = "holm")
+  )
+
+survival_tests_noyo
+```
+
+
+#big river
+```{r}
+# Big River
+kelp_big_river <- koa_both_sites %>%
+  filter(site == "big river")
+
+kelp_big_river_analysis <- kelp_big_river %>%
+  mutate(date = as.Date(
+      paste(year, month, day, sep = "-"),
+      format = "%Y-%m-%d"),
+    date = factor(date)) %>%
+  filter(
+    !is.na(kelp_on_ARKEV),
+    !is.na(ARKEV_type),
+    !is.na(ARKEV_unit)
+  )
+```
+
+```{r}
+kelp_model_big_river <- lmer(
+  kelp_on_ARKEV ~ ARKEV_type * date + (1 | ARKEV_unit),
+  data = kelp_big_river_analysis,
+  REML = TRUE
+)
+anova(kelp_model_big_river)
+
+emmeans(kelp_model_big_river, pairwise ~ ARKEV_type | date)
+```
+
+```{r}
+plot(kelp_model_big_river)
+qqnorm(residuals(kelp_model_big_river))
+qqline(residuals(kelp_model_big_river))
+```
+
+```{r}
+#number of ARKEVs that retain kelp by type
+baseline_big_river <- kelp_big_river %>%
+  mutate(
+    date = as.Date(
+      paste(year, month, day, sep = "-"),
+      format = "%Y-%m-%d"
+    )
+  ) %>%
+  filter(!is.na(kelp_on_ARKEV)) %>%
+  arrange(ARKEV_unit, date) %>%
+  group_by(ARKEV_unit) %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(
+    ARKEV_unit,
+    baseline_date = date,
+    baseline_kelp = kelp_on_ARKEV
+  )
+
+kelp_survival_big_river <- kelp_big_river %>%
+  mutate(
+    date = as.Date(
+      paste(year, month, day, sep = "-"),
+      format = "%Y-%m-%d"
+    )
+  ) %>%
+  filter(
+    !is.na(kelp_on_ARKEV),
+    !is.na(ARKEV_unit),
+    !is.na(ARKEV_type)
+  ) %>%
+  left_join(
+    baseline_big_river,
+    by = "ARKEV_unit"
+  )
+```
+
+```{r}
+ARKEV_survival_big_river <- kelp_survival_big_river %>%
+  arrange(ARKEV_unit, date) %>%
+  group_by(ARKEV_unit) %>%
+  mutate(
+    kelp_lost = as.integer(
+      baseline_kelp > 0 &
+      cumsum(kelp_on_ARKEV == 0) > 0
+    )
+  ) %>%
+  ungroup()
+
+ARKEV_survival_big_river %>%
+  filter(date == baseline_date) %>%
+  select(
+    ARKEV_unit,
+    ARKEV_type,
+    baseline_date,
+    baseline_kelp,
+    kelp_on_ARKEV
+  )
+
+ARKEV_survival_big_river %>%
+  filter(date == baseline_date) %>%
+  summarise(
+    n_ARKEV = n(),
+    n_mismatch = sum(baseline_kelp != kelp_on_ARKEV)
+  )
+
+```
+
+```{r}
+kelp_survival_big_river <- kelp_survival_big_river %>%
+  mutate(
+    kelp_lost = ifelse(
+      baseline_kelp > 0 & kelp_on_ARKEV == 0, 1, 0))
+
+kelp_survival_big_river_summary <- kelp_survival_big_river %>%
+  group_by(date, ARKEV_type) %>%
+  summarise(
+    n_ARKEV = n(),
+    n_lost = sum(kelp_lost),
+    n_retained = sum(kelp_lost == 0),
+    percent_lost = 100 * n_lost / n_ARKEV,
+    percent_retained = 100 * n_retained / n_ARKEV,
+    .groups = "drop"
+  )
+
+kelp_survival_big_river_summary
+```
+
+```{r}
+survival_tests_big_river <- kelp_survival_big_river %>%
+  filter(date > as.Date("2026-06-15")) %>%
+  group_by(date) %>%
+  summarise(
+    p_value = fisher.test(
+      table(ARKEV_type, kelp_lost)
+    )$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adjusted = p.adjust(p_value, method = "holm")
+  )
+
+survival_tests_big_river
+```
+
+#Both sites
+```{r}
+#linear model
+kelp_site_analysis <- koa_master %>%
+  filter(site %in% c("noyo", "big river")) %>%
+  mutate(
+    site = factor(site),
+    ARKEV_type = factor(ARKEV_type),
+    ARKEV_unit = factor(ARKEV_unit)
+  )
+
+kelp_model_sites <- lmer(
+  kelp_on_ARKEV ~ site * days_since_outplanting + ARKEV_type + (1 | ARKEV_unit), data = kelp_site_analysis, REML = TRUE)
+
+anova(kelp_model_sites)
+```
+
+```{r}
+# Quadratic time model
+kelp_model_sites_quad <- lmer(
+  kelp_on_ARKEV ~ site * (days_since_outplanting + I(days_since_outplanting^2)) + ARKEV_type + (1 | ARKEV_unit),
+  data = kelp_site_analysis,
+  REML = TRUE
+)
+
+# Compare models
+anova(kelp_model_sites, kelp_model_sites_quad)
+
+# Compare AIC
+AIC(kelp_model_sites, kelp_model_sites_quad)
+```
+
+```{r}
+anova(kelp_model_sites_quad)
+```
+
+```{r}
+site_means <- kelp_site_analysis %>%
+  group_by(site, days_since_outplanting) %>%
+  summarise(
+    n = sum(!is.na(kelp_on_ARKEV)),
+    mean_kelp = mean(kelp_on_ARKEV, na.rm = TRUE),
+    se = sd(kelp_on_ARKEV, na.rm = TRUE) / sqrt(n),
+    .groups = "drop")
+
+
+days_seq <- seq(
+  min(kelp_site_analysis$days_since_outplanting, na.rm = TRUE),
+  max(kelp_site_analysis$days_since_outplanting, na.rm = TRUE),
+  length.out = 200
+)
+
+pred <- emmeans(
+  kelp_model_sites_quad,
+  ~ site * days_since_outplanting,
+  at = list(days_since_outplanting = days_seq)
+)
+
+pred_df <- as.data.frame(pred)
+
+
+site_means <- kelp_site_analysis %>%
+  group_by(site, days_since_outplanting) %>%
+  summarise(
+    mean_kelp = mean(kelp_on_ARKEV, na.rm = TRUE),
+    se = sd(kelp_on_ARKEV, na.rm = TRUE) / sqrt(sum(!is.na(kelp_on_ARKEV))),
+    .groups = "drop"
+  )
+
+
+```
+
+```{r}
+site_colors <- c(
+  "noyo" = "#0072B2",
+  "big river" = "#E69F00"
+)
+
+ggplot() + geom_ribbon(data = pred_df,aes(x = days_since_outplanting, ymin = lower.CL, ymax = upper.CL, fill = site ),
+    alpha = 0.20) +
+  geom_line(data = pred_df, aes(x = days_since_outplanting, y = emmean, color = site),linewidth = 1.2) +
+  geom_point(data = site_means, aes(x = days_since_outplanting, y = mean_kelp,color = site),size = 3) +
+  geom_errorbar(data = site_means,  aes(x = days_since_outplanting, ymin = mean_kelp - se, ymax = mean_kelp + se, color = site),  width = 2,linewidth = 0.8 ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = c( "noyo" = "Noyo","big river" = "Big River")) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = c("noyo" = "Noyo", "big river" = "Big River")) +
+  labs(
+    title = "Kelp abundance per ARKEV through time since outplanting",
+    subtitle = "Predicted trajectories from quadratic mixed-effects model",
+    x = "Days Since Outplanting",
+    y = "Kelp per ARKEV",
+    color = "Site",
+    fill = "Site"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 14, face = "bold"),
+    axis.text.y = element_text(size = 14, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 17, face = "bold"),
+    plot.subtitle = element_text(size = 13, face = "italic"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 12),
+    legend.position = "right"
+  )
+```
+
+```{r}
+site_means <- kelp_site_analysis %>%
+  group_by(site, days_since_outplanting) %>%
+  summarise(
+    mean_kelp = mean(kelp_on_ARKEV, na.rm = TRUE),
+    se = sd(kelp_on_ARKEV, na.rm = TRUE) /
+      sqrt(sum(!is.na(kelp_on_ARKEV))),
+    .groups = "drop"  )
+
+noyo_data <- site_means %>%
+  filter(site == "noyo")
+
+big_river_data <- site_means %>%
+  filter(site == "big river")
+
+noyo_exp <- nls(mean_kelp ~ a * exp(-b * days_since_outplanting) + c, data = noyo_data, start = list(a = 6, b = 0.01, c = 2))
+
+big_river_exp <- nls(mean_kelp ~ a * exp(-b * days_since_outplanting) + c,data = big_river_data,start = list(a = 8, b = 0.03, c = 1.5))
+
+pred_days <- seq(
+  0,
+  max(kelp_site_analysis$days_since_outplanting, na.rm = TRUE),
+  length.out = 200)
+
+noyo_pred <- data.frame(days_since_outplanting = pred_days, site = "noyo")
+
+noyo_pred$fit <- predict( noyo_exp, newdata = noyo_pred)
+
+big_river_pred <- data.frame(days_since_outplanting = pred_days, site = "big river")
+
+big_river_pred$fit <- predict(big_river_exp, newdata = big_river_pred)
+
+pred_df <- bind_rows(noyo_pred, big_river_pred)
+```
+
+```{r}
+site_colors <- c("noyo" = "#0072B2","big river" = "#E69F00")
+
+ggplot() + geom_line(data = pred_df,aes(x = days_since_outplanting, y = fit,color = site),linewidth = 1.2) +
+  geom_point(data = site_means, aes(x = days_since_outplanting, y = mean_kelp, color = site), size = 3) +
+  geom_errorbar(data = site_means,aes(x = days_since_outplanting, ymin = mean_kelp - se,ymax = mean_kelp + se,color = site),width = 2,linewidth = 0.8) +
+  scale_color_manual(
+    values = site_colors,
+    labels = c(
+      "noyo" = "Noyo",
+      "big river" = "Big River")) +
+  labs(
+    title = "Kelp abundance per ARKEV through time since outplanting",
+    subtitle = "Observed means ± SE with fitted decay trajectories",
+    x = "Days Since Outplanting",
+    y = "Kelp per ARKEV",
+    color = "Site") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 14, face = "bold"),
+    axis.text.y = element_text(size = 14, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 17, face = "bold"),
+    plot.subtitle = element_text(size = 13, face = "italic"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 12),
+    legend.position = "right"
+  )
+```
+
+
+#STIPE LENGTH DATA FOR BOTH SITES
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+stipe_arkev <- koa_master %>%
+  mutate(date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")) %>%
+  filter(
+    site %in% c("noyo", "big river")) %>%
+  pivot_longer(
+    cols = starts_with("stipe_length_"),
+    names_to = "stipe_number",
+    values_to = "stipe_length"
+  ) %>%
+  filter(!is.na(stipe_length)) %>%
+  
+  # Calculate the average of the measured stipes
+  # for each individual ARKEV
+  group_by(site, date, days_since_outplanting, ARKEV_unit, ARKEV_type) %>%
+  summarise(
+    arkev_mean_length = mean(stipe_length),
+    n_stipes = n(),
+    .groups = "drop"
+  )
+
+stipe_data <- stipe_arkev %>%
+  group_by(site, date, ARKEV_type) %>%
+  summarise(
+    avg_length_type = mean(arkev_mean_length),
+    se_type = sd(arkev_mean_length) / sqrt(n()),
+    max_type = max(arkev_mean_length),
+    n_arkev = n(),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(stipe_data,aes(x = date, y = avg_length_type, color = site, linetype = ARKEV_type, group = interaction(site, ARKEV_type))) +
+  geom_point(size = 2.5) +
+  geom_line(linewidth = 1) +
+  geom_errorbar(
+    aes(ymin = avg_length_type - se_type,
+      ymax = avg_length_type + se_type),
+    width = 1.5) +
+  scale_linetype_manual(
+    values = c(
+      "PVC" = "solid",
+      "WOOD" = "dashed")) +
+   scale_color_manual(
+    values = c(
+      "big river" = "#E69F00", 
+      "noyo" = "#0072B2"        
+      )) +
+  labs(
+    title = "Average Stipe Length by ARKEV Type",
+    x = "Month",
+    y = "Average Stipe Length (cm)",
+    color = "Site",
+    linetype = "ARKEV Type") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    plot.title = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+
+#test for differences in stipe length among type within each site 
+```{r}
+stipe_model_data <- stipe_arkev %>%
+  mutate(
+    ARKEV_type = factor(ARKEV_type),
+    ARKEV_unit = factor(ARKEV_unit),
+    date = factor(date)
+  )
+```
+
+#noyo
+```{r}
+stipe_noyo <- stipe_model_data %>%
+  filter(site == "noyo")
+
+stipe_model_noyo <- lmer(
+  arkev_mean_length ~ ARKEV_type + date + (1 | ARKEV_unit),
+  data = stipe_noyo
+)
+
+anova(stipe_model_noyo)
+
+emmeans(stipe_model_noyo, pairwise ~ ARKEV_type)
+emmeans(stipe_model_noyo, pairwise ~ date)
+```
+
+```{r}
+par(mfrow = c(1, 2))
+
+plot(
+  fitted(stipe_model_noyo),
+  resid(stipe_model_noyo),
+  xlab = "Fitted values",
+  ylab = "Residuals",
+  main = "Residuals vs Fitted"
+)
+
+abline(h = 0, lty = 2)
+
+qqnorm(
+  resid(stipe_model_noyo),
+  main = "Normal Q-Q Plot"
+)
+
+qqline(resid(stipe_model_noyo))
+```
+
+```{r}
+library(nlme)
+
+stipe_model_noyo_var <- lme(
+  arkev_mean_length ~ ARKEV_type + date,
+  random = ~1 | ARKEV_unit,
+  weights = varIdent(form = ~1 | ARKEV_type),
+  data = stipe_noyo,
+  method = "REML")
+
+anova(stipe_model_noyo_var)
+
+emmeans(stipe_model_noyo_var, pairwise ~ date)
+```
+
+```{r}
+par(mfrow = c(1, 2))
+
+plot(
+  fitted(stipe_model_noyo_var),
+  resid(stipe_model_noyo_var, type = "normalized"),
+  xlab = "Fitted values",
+  ylab = "Normalized residuals",
+  main = "Residuals vs Fitted"
+)
+
+abline(h = 0, lty = 2)
+
+qqnorm(
+  resid(stipe_model_noyo_var, type = "normalized"),
+  main = "Normal Q-Q Plot"
+)
+
+qqline(resid(stipe_model_noyo_var, type = "normalized"))
+```
+
+```{r}
+AIC(stipe_model_noyo, stipe_model_noyo_var)
+```
+
+##Use simpler model since AIC are nearly the same and they are essentially the same fit
+
+
+#big river
+```{r}
+stipe_big_river <- stipe_model_data %>%
+  filter(site == "big river")
+
+stipe_model_big_river <- lmer(
+  arkev_mean_length ~ ARKEV_type + date + (1 | ARKEV_unit),
+  data = stipe_big_river
+)
+
+anova(stipe_model_big_river)
+emmeans(stipe_model_big_river, pairwise ~ ARKEV_type)
+emmeans(stipe_model_big_river, pairwise ~ date)
+```
+
+```{r}
+par(mfrow = c(1, 2))
+
+plot(
+  fitted(stipe_model_big_river),
+  resid(stipe_model_big_river),
+  xlab = "Fitted values",
+  ylab = "Residuals",
+  main = "Residuals vs Fitted"
+)
+
+abline(h = 0, lty = 2)
+
+qqnorm(
+  resid(stipe_model_big_river),
+  main = "Normal Q-Q Plot"
+)
+
+qqline(resid(stipe_model_big_river))
+```
+
+```{r}
+library(nlme)
+
+stipe_model_br_nlme <- lme(
+  arkev_mean_length ~ ARKEV_type + date,
+  random = ~1 | ARKEV_unit,
+  data = stipe_model_data %>% filter(site == "big river"),
+  method = "REML"
+)
+
+stipe_model_br_var <- lme(
+  arkev_mean_length ~ ARKEV_type + date,
+  random = ~1 | ARKEV_unit,
+  weights = varIdent(form = ~1 | date),
+  data = stipe_model_data %>% filter(site == "big river"),
+  method = "REML"
+)
+
+AIC(stipe_model_br_nlme, stipe_model_br_var, stipe_model_big_river)
+
+```
+
+```{r}
+anova(stipe_model_br_nlme, stipe_model_br_var)
+```
+
+```{r}
+anova(stipe_model_br_var)
+
+emmeans(stipe_model_br_var, pairwise ~ ARKEV_type)
+emmeans(stipe_model_br_var, pairwise ~ date)
+```
+
+#stipe growth rate
+```{r}
+stipe_growth <- stipe_arkev %>%
+  mutate(date = as.Date(date)) %>%
+  arrange(site, ARKEV_unit, date, days_since_outplanting) %>%
+  group_by(site, ARKEV_unit) %>%
+  mutate(previous_length = lag(arkev_mean_length), previous_date = lag(date), days_between = as.numeric(date - previous_date), growth_cm = arkev_mean_length - previous_length, growth_rate_cm_day = growth_cm / days_between
+  ) %>%
+  ungroup() %>%
+  filter(!is.na(growth_rate_cm_day))
+
+stipe_growth %>%
+  group_by(site) %>%
+  summarise(n = n(), mean_growth_rate = mean(growth_rate_cm_day, na.rm = TRUE), se = sd(growth_rate_cm_day, na.rm = TRUE) / sqrt(n),
+    .groups = "drop")
+```
+
+```{r}
+growth_model <- lmer(
+  growth_rate_cm_day ~ site + (1 | ARKEV_unit),
+  data = stipe_growth,
+  REML = TRUE
+)
+
+anova(growth_model)
+
+emmeans(growth_model, pairwise ~ site)
+```
+```{r}
+growth_model_time <- lmer(
+  growth_rate_cm_day ~ site * days_since_outplanting +
+    (1 | ARKEV_unit),
+  data = stipe_growth,
+  REML = TRUE
+)
+
+anova(growth_model_time)
+
+emmeans(growth_model_time, pairwise ~ site | days_since_outplanting)
+```
+
+```{r}
+stipe_growth_day <- stipe_arkev %>%
+  mutate(
+    date = as.Date(date),
+    site = factor(site),
+    ARKEV_unit = factor(ARKEV_unit)
+  ) %>%
+  arrange(site, ARKEV_unit, date) %>%
+  group_by(site, ARKEV_unit) %>%
+  mutate(
+    previous_length = lag(arkev_mean_length),
+    previous_date = lag(date),
+    previous_days = lag(days_since_outplanting),
+
+    days_between =
+      days_since_outplanting - previous_days,
+
+    growth_cm =
+      arkev_mean_length - previous_length,
+
+    growth_rate_cm_day =
+      growth_cm / days_between,
+
+    days_since_outplanting_midpoint =
+      (previous_days + days_since_outplanting) / 2
+  ) %>%
+  ungroup() %>%
+  filter(
+    !is.na(growth_rate_cm_day),
+    !is.na(days_since_outplanting_midpoint),
+    days_between > 0
+  )
+```
+
+```{r}
+growth_model_midpoint <- lmer(
+  growth_rate_cm_day ~
+    site * days_since_outplanting_midpoint +
+    (1 | ARKEV_unit),
+  data = stipe_growth_day,
+  REML = TRUE
+)
+
+anova(growth_model_midpoint)
+```
+
+```{r}
+growth_means_midpoint <- stipe_growth_day %>%
+  group_by(
+    site,
+    days_since_outplanting_midpoint
+  ) %>%
+  summarise(
+    mean_growth =
+      mean(growth_rate_cm_day, na.rm = TRUE),
+
+    se =
+      sd(growth_rate_cm_day, na.rm = TRUE) /
+      sqrt(sum(!is.na(growth_rate_cm_day))),
+
+    .groups = "drop"
+  )
+
+growth_pred <- emmeans(
+  growth_model_midpoint,
+  ~ site | days_since_outplanting_midpoint,
+  at = list(
+    days_since_outplanting_midpoint =
+      seq(
+        min(stipe_growth$days_since_outplanting_midpoint, na.rm = TRUE),
+        max(stipe_growth$days_since_outplanting_midpoint, na.rm = TRUE),
+        length.out = 200
+      )
+  )
+) %>%
+  as.data.frame()
+```
+
+```{r}
+ggplot() +geom_ribbon(data = growth_pred, aes(x = days_since_outplanting_midpoint,ymin = lower.CL,ymax = upper.CL, fill = site), alpha = 0.20,color = NA) +
+  geom_line(data = growth_pred,  aes(x = days_since_outplanting_midpoint, y = emmean, color = site),linewidth = 1.2) +
+  geom_point(data = growth_means_midpoint,aes(x = days_since_outplanting_midpoint,y = mean_growth,color = site),size = 3) +
+  geom_errorbar(data = growth_means_midpoint, aes(x = days_since_outplanting_midpoint,ymin = mean_growth - se,ymax = mean_growth + se,color = site),width = 2,linewidth = 0.8) +
+  scale_color_manual(values = c("noyo" = "#0072B2", "big river" = "#E69F00"),labels = c("noyo" = "Noyo","big river" = "Big River")) +
+  scale_fill_manual(values = c("noyo" = "#0072B2","big river" = "#E69F00"),labels = c("noyo" = "Noyo","big river" = "Big River")) +
+  labs(
+    title = "Change in stipe growth rate per ARKEV since outplanting",
+    x = "Days since outplanting",
+    y = "Rate of change in mean stipe length (cm/day)",
+    color = "Site",
+    fill = "Site"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 13, face = "bold"),
+    axis.text.y = element_text(size = 13, face = "bold"),
+    axis.title.x = element_text(size = 13, face = "bold"),
+    axis.title.y = element_text(size = 13, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 13),
+    legend.position = "right"
+  )
+```
+
+
+```{r}
+stipe_growth_date <- stipe_arkev %>%
+  mutate(
+    site = as.character(site),
+    ARKEV_unit = as.character(ARKEV_unit),
+    date = as.Date(date)) %>%
+  arrange(site, ARKEV_unit, date) %>%
+  group_by(site, ARKEV_unit) %>%
+  mutate(
+    next_date = lead(date),
+    next_mean_length = lead(arkev_mean_length),
+    growth_rate = (next_mean_length - arkev_mean_length) / as.numeric(next_date - date),
+    midpoint_date = date +(next_date - date) / 2) %>%
+  ungroup() %>%
+  filter(!is.na(growth_rate),
+    !is.na(midpoint_date))
+```
+
+```{r}
+stipe_growth_summary_date <- stipe_growth_date %>%
+  group_by(site, midpoint_date) %>%
+  summarise(
+    n = n(),
+    mean_growth = mean(growth_rate, na.rm = TRUE),
+    se = sd(growth_rate, na.rm = TRUE) / sqrt(n),
+    .groups = "drop")
+
+stipe_growth_model_date <- lmer(
+  growth_rate ~ site * midpoint_date + (1 | ARKEV_unit),
+  data = stipe_growth_date,
+  REML = TRUE)
+
+anova(stipe_growth_model_date)
+```
+
+```{r}
+pred_dates <- seq(
+  min(stipe_growth_date$midpoint_date),
+  max(stipe_growth_date$midpoint_date),
+  length.out = 200
+)
+
+pred_data <- expand.grid(
+  midpoint_date = pred_dates,
+  site = unique(stipe_growth_date$site)
+)
+
+pred_data$site <- as.character(pred_data$site)
+
+pred <- predict(
+  stipe_growth_model_date,
+  newdata = pred_data,
+  re.form = NA,
+  se.fit = TRUE
+)
+
+pred_data$fit <- pred$fit
+pred_data$lower <- pred$fit - 1.96 * pred$se.fit
+pred_data$upper <- pred$fit + 1.96 * pred$se.fit
+```
+
+```{r}
+ggplot() +  geom_ribbon(data = pred_data, aes(x = midpoint_date, ymin = lower, ymax = upper, fill = site), alpha = 0.20, color = NA
+  ) +
+  geom_line(data = pred_data, aes(x = midpoint_date,y = fit,color = site),linewidth = 1.2) +
+  geom_errorbar(data = stipe_growth_summary_date, aes(x = midpoint_date, ymin = mean_growth - se, ymax = mean_growth + se,color = site),width = 2,linewidth = 0.8) +
+  geom_point(
+    data = stipe_growth_summary_date, aes(x = midpoint_date,y = mean_growth,color = site),size = 3) +
+  scale_color_manual( values = c("noyo" = "#0072B2","big river" = "#E69F00" ),labels = c("noyo" = "Noyo", "big river" = "Big River")) +
+  scale_fill_manual(values = c("noyo" = "#0072B2", "big river" = "#E69F00"), labels = c("noyo" = "Noyo","big river" = "Big River")) +
+  scale_x_date(date_breaks = "2 weeks", date_labels = "%b %d") +
+  labs(
+    title = "Rate of Change in Mean Stipe Length through time",
+    subtitle = "Interval change in ARKEV-level mean stipe length",
+    x = "",
+    y = "Rate of Change in Mean Stipe Length (cm/day)",
+    color = "Site",
+    fill = "Site"
+  ) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 13, face = "bold", angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 13, face = "bold"),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold"),
+        plot.subtitle = element_text(size = 12, face = "italic"),
+        legend.title = element_text(size = 13, face = "bold"),
+        legend.text = element_text(size = 12),
+        legend.position = "right"
+        )
+```
+
+
+
+
+
+```{r}
+koa_noyo <- koa_master %>%
+  select(site == "noyo")
+
+koa_1 <- koa_noyo %>%
+  filter(date == "2026-05-25") %>%
+  dplyr::select(date,site,ARKEV_type, ARKEV_unit,kelp_on_ARKEV)
+
+koa_1 <- data.frame(
+  ARKEV_type = c(rep("PVC", 40), rep("WOOD", 10)),
+  kelp_on_ARKEV = c(
+    9, 10, 9, 8, 4, 8, 7, 9, 6, 6, 6, 8, 9, 9, 8, 9, 9, 10, 8, 9,
+    7, 4, 9, 8, 10, 7, 5, 7, 8, 8, 6, 7, 6, 6, 3, 7, 8, 5, 8, 7,  # PVC
+    1, 4, 1, 4, 0, 6, 0, 0, 0, 1))                                    # WOOD
+```
+
+```{r}
+all_x        <- 0:10
+pvc_heights  <- sapply(all_x, function(k) sum(koa_1$kelp_on_ARKEV == k & koa_1$ARKEV_type == "PVC"))
+wood_heights <- sapply(all_x, function(k) sum(koa_1$kelp_on_ARKEV == k & koa_1$ARKEV_type == "WOOD"))
+
+stacked <- rbind(PVC = pvc_heights, WOOD = wood_heights)
+totals  <- colSums(stacked)
+
+max_y <- max(colSums(stacked))
+y_top <- ceiling(max_y / 2) * 2 + 2
+
+par(mar = c(4.5, 4.5, 3, 1), bg = "white")
+
+bp <- barplot(stacked,
+  names.arg  = all_x,
+  col        = c("#2E7D6E", "#C4622D"),
+  border     = "black",
+  space      = 0.15,
+  ylim       = c(0, 11),
+  xlab       = "Kelp count per ARKEV unit",
+  ylab       = "Number of ARKEV units",
+  main       = "Kelp on ARKEV — 5/25/26 Noyo",
+  cex.axis   = 0.9,
+  cex.names  = 0.9,
+  cex.lab    = 1,
+  las        = 1,
+  legend.text = rownames(stacked),
+  args.legend = list(x = "topleft", bty = "n", cex = 0.9,
+                     fill = c("#C4622D","#2E7D6E"), border = NA))
+text(x      = bp,
+     y      = totals + 0.3,
+     labels = ifelse(totals > 0, totals, ""),
+     cex    = 0.85,
+     font   = 2,
+     adj    = c(0.5, 0))
+ 
+```
+
+#big river kelp on arkev
+```{r}
+koa_bigriver <- koa_master |>
+  mutate(
+    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
+  ) |>
+  distinct(date, ARKEV_unit, .keep_all = TRUE) |>
+  mutate(plot = str_extract(ARKEV_unit, "\\d+")) |>
+  mutate(plot = fct_relevel(ARKEV_type,
+                            "PVC",
+                            "WOOD"
+                            )) |>
+    group_by(date) |>
+  mutate(total = sum(kelp_on_ARKEV)) |>
+  group_by(date, ARKEV_type) |>
+  mutate(total_type = sum(kelp_on_ARKEV)) |>
+  group_by(date, ARKEV_type) |>
+  mutate(mean = mean(kelp_on_ARKEV),
+         se = sd(kelp_on_ARKEV)/sqrt(length(kelp_on_ARKEV))) |>
+  filter(site == "Big River")
+```
+
+```{r}
+koa_2 <- koa_bigriver %>%
+  filter(date == "2026-06-08") %>%
+  dplyr::select(date,site,ARKEV_type, ARKEV_unit,kelp_on_ARKEV)
+
+koa_3 <- koa_bigriver %>%
+  dplyr::select(date,site,ARKEV_type, ARKEV_unit,kelp_on_ARKEV)
+  
+```
+
+```{r}
+all_x2        <- 0:10
+pvc_heights2  <- sapply(all_x2, function(k) sum(koa_2$kelp_on_ARKEV == k & koa_2$ARKEV_type == "PVC"))
+wood_heights2 <- sapply(all_x2, function(k) sum(koa_2$kelp_on_ARKEV == k & koa_2$ARKEV_type == "WOOD"))
+stacked2 <- rbind(PVC = pvc_heights2, WOOD = wood_heights2)
+totals2  <- colSums(stacked2)
+
+max_y2 <- max(colSums(stacked2))
+y_top2 <- ceiling(max_y2 / 2) * 2 + 2
+
+par(mar = c(4.5, 4.5, 3, 1), bg = "white")
+
+par(mar = c(4.5, 4.5, 3, 1), bg = "white")
+bp2 <- barplot(stacked2,                          # ✅ fixed
+  names.arg  = all_x2,
+  col        = c("#2E7D6E", "#C4622D"),
+  border     = "black",
+  space      = 0.15,
+  ylim       = c(0, 11),
+  xlab       = "Kelp count per ARKEV unit",
+  ylab       = "Number of ARKEV units",
+  main       = "Kelp on ARKEV — 6/8/2026 Big River",
+  cex.axis   = 0.9,
+  cex.names  = 0.9,
+  cex.lab    = 1,
+  las        = 1,
+  legend.text = rownames(stacked2),
+  args.legend = list(x = "topleft", bty = "n", cex = 0.9,
+                     fill = c("#2E7D6E","#C4622D"),  # ✅ fixed
+                     border = NA))
+text(x      = bp2,
+     y      = totals2 + 0.3,
+     labels = ifelse(totals2 > 0, totals2, ""),
+     cex    = 0.85,
+     font   = 2,
+     adj    = c(0.5, 0))
+```
+
+#big river kelp on arkev survivorship
+```{r}
+survivorship <- koa_bigriver |>
+  filter(site == "Big River") |>
+  select(date, ARKEV_unit, ARKEV_type, kelp_on_ARKEV) |>
+  group_by(ARKEV_unit) |>
+  mutate(ARKEV_type = coalesce(ARKEV_type, first(na.omit(ARKEV_type)))) |>  # fill NA from same unit
+  ungroup() |>
+  pivot_wider(
+    names_from   = date,
+    values_from  = kelp_on_ARKEV,
+    names_prefix = "kelp_"
+  ) |>
+  rename(kelp_d1 = `kelp_2026-05-24`, kelp_d2 = `kelp_2026-06-08`) |>
+  mutate(survivorship_pct = (kelp_d2 / kelp_d1) * 100)
+
+survivorship_summary <- survivorship |>
+  group_by(ARKEV_type) |>
+  summarise(
+    n             = n(),
+    mean_surv_pct = mean(survivorship_pct, na.rm = TRUE),
+    se_surv_pct   = sd(survivorship_pct, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+overall <- survivorship |>
+  summarise(
+    ARKEV_type    = "OVERALL",
+    n             = n(),
+    mean_surv_pct = mean(survivorship_pct, na.rm = TRUE),
+    se_surv_pct   = sd(survivorship_pct, na.rm = TRUE) / sqrt(n())
+  )
+
+bind_rows(survivorship_summary, overall)
+```
