@@ -584,6 +584,7 @@ ggplot() + geom_line(data = pred_df,aes(x = days_since_outplanting, y = fit,colo
 ```
 
 
+
 #STIPE LENGTH DATA FOR BOTH SITES
 ```{r}
 library(dplyr)
