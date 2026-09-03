@@ -1,0 +1,2078 @@
+---
+title: "ARKEV_25_26"
+output: html_document
+date: "2026-09-02"
+---
+
+```{r}
+library(googlesheets4)
+
+fish = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=1772713005#gid=1772713005', sheet = 1)
+ki = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=1772713005#gid=1772713005', sheet = 2)
+cover = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=1772713005#gid=1772713005', sheet = 3)
+koa = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=1772713005#gid=1772713005', sheet = 4)
+
+fish <- fish %>%
+  rename(plot_type = arkev_type)
+
+ki <- ki %>%
+  rename(plot_type = arkev_type)
+
+cover <- cover %>%
+  rename(plot_type = arkev_type)
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+library(lubridate)
+
+clean_survey_metadata <- function(x) {
+  x %>%
+    mutate(
+      date = as.Date(date),
+      site = str_to_lower(str_trim(site)),
+      site = str_replace_all(site, " ", "_"),
+      plot_type = str_to_lower(str_trim(plot_type)),
+      arkev_unit = str_trim(arkev_unit)
+    )
+}
+
+fish  <- clean_survey_metadata(fish)
+ki    <- clean_survey_metadata(ki)
+cover <- clean_survey_metadata(cover)
+```
+
+```{r}
+survey_key <- c("date", "site", "plot_type", "arkev_unit")
+
+# Check duplicate survey keys
+fish %>%
+  count(across(all_of(survey_key))) %>%
+  summarise(
+    n_surveys = n(),
+    n_with_multiple_rows = sum(n > 1),
+    max_rows_per_survey = max(n)
+  )
+
+ki %>%
+  count(across(all_of(survey_key))) %>%
+  filter(n > 1)
+
+cover %>%
+  count(across(all_of(survey_key))) %>%
+  filter(n > 1)
+```
+
+```{r}
+# Number of unique surveys in each dataset
+fish %>%
+  distinct(across(all_of(survey_key))) %>%
+  nrow()
+
+ki %>%
+  distinct(across(all_of(survey_key))) %>%
+  nrow()
+
+cover %>%
+  distinct(across(all_of(survey_key))) %>%
+  nrow()
+```
+
+```{r}
+fish_surveys <- fish %>%
+  distinct(across(all_of(survey_key)))
+
+ki_surveys <- ki %>%
+  distinct(across(all_of(survey_key)))
+
+cover_surveys <- cover %>%
+  distinct(across(all_of(survey_key)))
+```
+
+```{r}
+anti_join(fish_surveys, ki_surveys, by = survey_key)
+
+anti_join(ki_surveys, fish_surveys, by = survey_key)
+
+anti_join(cover_surveys, ki_surveys, by = survey_key)
+
+anti_join(ki_surveys, cover_surveys, by = survey_key)
+```
+
+```{r}
+grazers <- c( "purple_urchins_<2cm","purple_urchins_>2cm","red_urchins","tegula")
+
+kelp <- c("NERA", "NERJ", "LAMR", "LAMSET", "PTECAL", "DESSPP", "ALAMAR", "COSCOS", "LAMSTUMP", "DICSPP","DICTYOTALES")
+
+inverts <- c("HALRUF", "HALKAM", "PATMIN",  "DERIMB",  "PISOCH",  "PISBRE",  "PISGIG",  "CANCERSPP",  "PUGPRO",  "PYCHEL")
+
+setdiff(
+  c(grazers, kelp, inverts),
+  names(ki)
+)
+```
+
+```{r}
+ki = ki %>%
+  mutate(
+    survey_id = paste(
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      sep = "_"
+    ))
+
+fish %>% 
+  mutate(
+    survey_id = paste(
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      sep = "_"
+    ))
+    
+cover %>%
+  mutate(
+    survey_id = paste(
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      sep = "_"
+    ))
+    
+kelp %>%
+  mutate(
+    survey_id = paste(
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      sep = "_"
+    ))
+```
+
+
+#2025 data
+```{r}
+surveys_2025 = read_sheet('https://docs.google.com/spreadsheets/d/1i3KlFK9ZlCHW7vNudpcN0kkriUDP4IahfxkR6CVGroQ/edit?gid=0#gid=0')
+
+surveys_2025 %>%
+  mutate(
+    site = str_to_lower(str_trim(site)),
+    site = str_replace_all(site, " ", "_"),
+    ARKEV_type = str_to_lower(str_trim(plot_type)),
+    ARKEV_unit = str_trim(ARKEV_unit),
+    data_type = str_to_lower(str_trim(data_type)),
+    species_code = str_to_upper(str_trim(species_code))
+    )
+
+survey_key_2025 <- c(
+  "year",
+  "date",
+  "site",
+  "ARKEV_type",
+  "ARKEV_unit"
+)
+```
+
+```{r}
+surveys_2025 <- surveys_2025 %>%
+  mutate(
+    date = as.Date(
+      paste(year, month, day, sep = "-")
+    )
+  )
+```
+
+```{r}
+surveys_2025 %>%
+  count(data_type, sort = TRUE)
+surveys_2025 %>%
+  count(data_type, species_code, sort = TRUE)
+```
+
+```{r}
+surveys_2025 <- surveys_2025 %>%
+  mutate(
+    count_num = as.numeric(unlist(count)),
+    percent_num = as.numeric(unlist(percent))
+  )
+
+surveys_2025 %>%
+  summarise(
+    count_class = class(count_num),
+    n_missing = sum(is.na(count_num))
+  )
+```
+
+
+```{r}
+surveys_2025 %>%
+  filter(data_type == "kelp") %>%
+  count(species_code, wt = count_num, sort = TRUE)
+
+surveys_2025 %>%
+  filter(data_type == "inverts") %>%
+  count(species_code, wt = count_num, sort = TRUE)
+
+surveys_2025 %>%
+  filter(data_type %in% c("urchins", "tegula")) %>%
+  count(data_type, species_code, sort = TRUE)
+```
+
+```{r}
+surveys_2025 <- surveys_2025 %>%
+  rename(arkev_unit = ARKEV_unit) %>%
+  mutate(year = 2025)
+
+surveys_2025 <- surveys_2025 %>%
+  mutate(
+    survey_id = paste(
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      sep = "_"
+    )
+  )
+```
+
+```{r}
+surveys_2025 %>%
+  filter(
+    data_type == "kelp",
+    species_code == "NO_KELP"
+  ) %>%
+  count(survey_id, sort = TRUE) %>%
+  summarise(
+    n_surveys_with_NO_KELP = n(),
+    total_NO_KELP_records = sum(n),
+    max_records_per_survey = max(n)
+  )
+```
+
+```{r}
+kelp_obs_2025 <- surveys_2025 %>%
+  filter(
+    data_type == "kelp",
+    species_code != "NO_KELP"
+  ) %>%
+  group_by(
+    survey_id,
+    species_code
+  ) %>%
+  summarise(
+    abundance = sum(count_num, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+kelp_2025_wide <- kelp_obs_2025 %>%
+  pivot_wider(
+    names_from = species_code,
+    values_from = abundance,
+    values_fill = 0
+  ) %>%
+  right_join(
+    kelp_surveys_2025,
+    by = "survey_id"
+  ) %>%
+  mutate(
+    across(
+      where(is.numeric),
+      ~ replace_na(.x, 0)
+    )
+  ) %>%
+  select(
+    survey_id,
+    year,
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    everything()
+  )
+```
+
+```{r}
+kelp_2025_wide %>%
+  summarise(
+    n_surveys = n(),
+    n_all_zero = sum(
+      rowSums(
+        select(
+          .,
+          -survey_id,
+          -year,
+          -date,
+          -site,
+          -plot_type,
+          -arkev_unit
+        ),
+        na.rm = TRUE
+      ) == 0
+    )
+  )
+```
+
+
+```{r}
+surveys_2025 %>%
+  summarise(
+    n_rows = n(),
+    n_surveys = n_distinct(survey_id),
+    n_date = n_distinct(date),
+    n_sites = n_distinct(site),
+    n_plot_types = n_distinct(plot_type),
+    n_units = n_distinct(arkev_unit)
+  )
+
+surveys_2025 %>%
+  count(
+    survey_id,
+    date,
+    site,
+    plot_type,
+    arkev_unit
+  ) %>%
+  filter(n > 1) %>%
+  head(20)
+```
+
+```{r}
+grazer_obs_2025 <- surveys_2025 %>%
+  filter(
+    data_type %in% c("urchins", "tegula")
+  ) %>%
+  mutate(
+    species = case_when(
+      species_code == "STRPUR" & size_cm == "<2cm" ~ "purple_urchins_<2cm",
+      species_code == "STRPUR" & size_cm == ">2cm" ~ "purple_urchins_>2cm",
+      species_code == "MESFRA" ~ "red_urchins",
+      species_code == "TEGULA" ~ "tegula",
+      species_code == "TEG_ARK" ~ NA_character_,
+      TRUE ~ species_code
+    )
+  ) %>%
+  filter(!is.na(species)) %>%
+  group_by(
+    survey_id,
+    species
+  ) %>%
+  summarise(
+    abundance = sum(count_num, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+grazer_surveys_2025 <- surveys_2025 %>%
+  filter(
+    data_type %in% c("urchins", "tegula")
+  ) %>%
+  distinct(
+    survey_id,
+    year,
+    date,
+    site,
+    plot_type,
+    arkev_unit
+  )
+```
+
+```{r}
+grazer_2025_wide <- grazer_surveys_2025 %>%
+  left_join(
+    grazer_obs_2025,
+    by = "survey_id"
+  ) %>%
+  filter(!is.na(species)) %>%
+  pivot_wider(
+    names_from = species,
+    values_from = abundance,
+    values_fill = 0
+  ) %>%
+  right_join(
+    grazer_surveys_2025,
+    by = c(
+      "survey_id",
+      "year",
+      "date",
+      "site",
+      "plot_type",
+      "arkev_unit"
+    )
+  ) %>%
+  mutate(
+    across(
+      where(is.numeric),
+      ~ tidyr::replace_na(.x, 0)
+    )
+  )
+
+grazer_2025_wide %>%
+  summarise(
+    n_surveys = n(),
+    n_all_zero = sum(
+      rowSums(
+        select(
+          .,
+          -survey_id,
+          -year,
+          -date,
+          -site,
+          -plot_type,
+          -arkev_unit
+        )
+      ) == 0
+    )
+  )
+
+grazer_2025_wide %>%
+  summarise(
+    n_surveys = n(),
+    n_small = sum(`purple_urchins_<2cm` > 0),
+    n_large = sum(`purple_urchins_>2cm` > 0)
+  )
+
+grazer_2025_wide %>%
+  summarise(
+    n_surveys = n(),
+    small_urchins = sum(`purple_urchins_<2cm` >0),
+    large_urchins = sum(`purple_urchins_>2cm` >0),
+    red_urchins = sum(red_urchins  >0),
+    tegula = sum(tegula  >0)
+  )
+```
+
+```{r}
+invert_obs_2025 <- surveys_2025 %>%
+  filter(
+    data_type == "inverts",
+    species_code != "NO_INVERTS"
+  ) %>%
+  group_by(
+    survey_id,
+    species_code
+  ) %>%
+  summarise(
+    abundance = sum(count_num, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+invert_surveys_2025 <- surveys_2025 %>%
+  filter(data_type == "inverts") %>%
+  distinct(
+    survey_id,
+    year,
+    date,
+    site,
+    plot_type,
+    arkev_unit
+  )
+```
+
+```{r}
+invert_2025_wide <- invert_surveys_2025 %>%
+  left_join(
+    invert_obs_2025,
+    by = "survey_id"
+  ) %>%
+  pivot_wider(
+    names_from = species_code,
+    values_from = abundance,
+    values_fill = 0
+  )
+
+invert_2025_wide %>%
+  summarise(
+    n_surveys = n(),
+    n_all_zero = sum(
+      rowSums(
+        select(
+          .,
+          -survey_id,
+          -year,
+          -date,
+          -site,
+          -plot_type,
+          -arkev_unit
+        ),
+        na.rm = TRUE
+      ) == 0
+    )
+  )
+
+```
+
+
+#combine 2025 and 2026
+##match species code
+```{r}
+#grazers
+sort(setdiff(
+  names(grazer_2025_wide),
+  grazers
+))
+
+sort(setdiff(
+  grazers,
+  names(grazer_2025_wide)
+))
+
+
+#inverts
+sort(setdiff(
+  names(invert_2025_wide),
+  inverts
+))
+
+sort(setdiff(
+  inverts,
+  names(invert_2025_wide)
+))
+
+
+#kelp
+sort(setdiff(
+  names(kelp_2025_wide),
+  kelp
+))
+
+sort(setdiff(
+  kelp,
+  names(kelp_2025_wide)
+))
+```
+```{r}
+invert_2025_wide %>%
+  summarise(
+    n_nonzero_NA = sum(`NA` != 0, na.rm = TRUE),
+    n_nonmissing_NA = sum(!is.na(`NA`))
+  )
+```
+
+```{r}
+invert_2025_std <- invert_2025_wide %>%
+  select(-`NA`) %>%
+  rename(
+    CANCERSPP = CANSPP,
+    PUGPRO = PUGSPP
+  ) %>%
+  mutate(
+    site = case_when(
+      site == "Big_River" ~ "Big River",
+      site == "big_river" ~ "Big River",
+      site == "Noyo" ~ "Noyo",
+      site == "noyo" ~ "Noyo",
+      TRUE ~ site
+    ),
+    survey_id = as.character(survey_id),
+    arkev_unit = as.character(arkev_unit)
+  )
+
+invert_2026_std <- ki %>%
+  transmute(
+    survey_id = as.character(survey_id),
+    year = 2026,
+    date,
+    site = case_when(
+      site == "big_river" ~ "Big River",
+      site == "Big_River" ~ "Big River",
+      site == "noyo" ~ "Noyo",
+      site == "Noyo" ~ "Noyo",
+      TRUE ~ site
+    ),
+    plot_type,
+    arkev_unit,
+    across(all_of(inverts))
+  )
+
+invert_2026_std <- invert_2026_std %>%
+  mutate(
+    across(
+      all_of(inverts),
+      ~ as.numeric(unlist(.x))
+    )
+  )
+```
+
+```{r}
+sort(setdiff(
+  names(invert_2025_std),
+  names(invert_2026_std)
+))
+
+sort(setdiff(
+  names(invert_2026_std),
+  names(invert_2025_std)
+))
+```
+
+```{r}
+invert_2025_2026 <- bind_rows(
+  invert_2025_std,
+  invert_2026_std
+) %>%
+  mutate(
+    across(
+      -c(
+        survey_id,
+        year,
+        date,
+        site,
+        plot_type,
+        arkev_unit
+      ),
+      ~ tidyr::replace_na(.x, 0)
+    )
+  )
+
+invert_2025_2026 %>%
+  count(year, site)
+
+invert_2025_2026 %>%
+  summarise(
+    n_surveys = n(),
+    n_2025 = sum(year == 2025),
+    n_2026 = sum(year == 2026),
+    n_sites = n_distinct(site)
+  )
+```
+
+```{r}
+# kelp
+sort(setdiff(
+  names(kelp_2025_wide),
+  kelp
+))
+
+sort(setdiff(
+  kelp,
+  names(kelp_2025_wide)
+))
+```
+
+```{r}
+surveys_2025 %>%
+  filter(
+    data_type == "kelp",
+    species_code %in% c("DICSPP", "DICTYOTALES")
+  ) %>%
+  summarise(
+    DICSPP_records = sum(species_code == "DICSPP"),
+    DICSPP_abundance = sum(count_num[species_code == "DICSPP"], na.rm = TRUE),
+    DICTYOTALES_records = sum(species_code == "DICTYOTALES"),
+    DICTYOTALES_abundance = sum(count_num[species_code == "DICTYOTALES"], na.rm = TRUE)
+  )
+```
+
+```{r}
+kelp_2025_std <- kelp_2025_wide %>%
+  rename(
+    ALAMAR = ALAR,
+    PTECAL = PTER,
+    LAMSTUMP = STUMP
+  ) %>%
+  mutate(
+    site = case_when(
+      site == "Big_River" ~ "Big River",
+      site == "big_river" ~ "Big River",
+      site == "Noyo" ~ "Noyo",
+      site == "noyo" ~ "Noyo",
+      TRUE ~ site
+    ),
+    survey_id = as.character(survey_id),
+    arkev_unit = as.character(arkev_unit)
+  )
+
+kelp_2026_std <- ki %>%
+  transmute(
+    survey_id = as.character(survey_id),
+    year = 2026,
+    date,
+    site = case_when(
+      site == "big_river" ~ "Big River",
+      site == "Big_River" ~ "Big River",
+      site == "noyo" ~ "Noyo",
+      site == "Noyo" ~ "Noyo",
+      TRUE ~ site
+    ),
+    plot_type,
+    arkev_unit,
+     across(all_of(setdiff(kelp, c("DICSPP", "DICTYOTALES")))),
+    DICSPP = 0,
+    DICTYOTALES = 0
+  )
+
+sort(setdiff(
+  names(kelp_2025_std),
+  names(kelp_2026_std)
+))
+
+sort(setdiff(
+  names(kelp_2026_std),
+  names(kelp_2025_std)
+))
+
+kelp_2026_std <- kelp_2026_std %>%
+  mutate(
+    across(
+      all_of(c(kelp, "DICSPP", "DICTYOTALES")),
+      ~ as.numeric(unlist(.x))
+    )
+  )
+```
+
+```{r}
+kelp_2025_2026 <- bind_rows(
+  kelp_2025_std,
+  kelp_2026_std
+)
+
+kelp_2025_2026 %>%
+  count(year, site)
+
+kelp_2025_2026 %>%
+  summarise(
+    n_surveys = n(),
+    n_2025 = sum(year == 2025),
+    n_2026 = sum(year == 2026),
+    n_sites = n_distinct(site)
+  )
+```
+
+
+
+```{r}
+grazer_2025_std <- grazer_2025_wide %>%
+  select(
+    survey_id,
+    year,
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    all_of(grazers)
+  ) %>%
+  mutate(
+    survey_id = as.character(survey_id),
+    arkev_unit = as.character(arkev_unit),
+    site = case_when(
+      site == "Big_River" ~ "Big River",
+      site == "big_river" ~ "Big River",
+      site == "Noyo" ~ "Noyo",
+      site == "noyo" ~ "Noyo",
+      TRUE ~ site
+    )
+  )
+
+grazer_2026_std <- ki %>%
+  transmute(
+    survey_id = as.character(survey_id),
+    year = 2026,
+    date,
+    site = case_when(
+      site == "big_river" ~ "Big River",
+      site == "Big_River" ~ "Big River",
+      site == "noyo" ~ "Noyo",
+      site == "Noyo" ~ "Noyo",
+      TRUE ~ site
+    ),
+    plot_type,
+    arkev_unit = as.character(arkev_unit),
+    across(all_of(grazers))
+  ) %>%
+  mutate(
+    across(
+      all_of(grazers),
+      ~ as.numeric(unlist(.x))
+    )
+  )
+
+
+sort(setdiff(
+  names(grazer_2025_std),
+  names(grazer_2026_std)
+))
+
+sort(setdiff(
+  names(grazer_2026_std),
+  names(grazer_2025_std)
+))
+
+grazer_2026_std <- grazer_2026_std %>%
+  mutate(
+    across(
+      all_of(grazers),
+      ~ as.numeric(unlist(.x))
+    )
+  )
+```
+
+```{r}
+grazer_2025_2026 <- bind_rows(
+  grazer_2025_std,
+  grazer_2026_std
+)
+
+grazer_2025_2026 %>%
+  count(year, site)
+
+grazer_2025_2026 %>%
+  summarise(
+    n_surveys = n(),
+    n_2025 = sum(year == 2025),
+    n_2026 = sum(year == 2026),
+    n_sites = n_distinct(site)
+  )
+```
+
+```{r}
+grazer_2025_2026 %>%
+  count(survey_id) %>%
+  summarise(
+    n_surveys = n(),
+    duplicate_surveys = sum(n > 1)
+  )
+
+invert_2025_2026 %>%
+  count(survey_id) %>%
+  summarise(
+    n_surveys = n(),
+    duplicate_surveys = sum(n > 1)
+  )
+
+kelp_2025_2026 %>%
+  count(survey_id) %>%
+  summarise(
+    n_surveys = n(),
+    duplicate_surveys = sum(n > 1)
+  )
+```
+
+##join
+```{r}
+ki_2025_2026 <- grazer_2025_2026 %>%
+  full_join(
+    kelp_2025_2026 %>%
+      select(
+        survey_id,
+        all_of(kelp)
+      ),
+    by = "survey_id"
+  ) %>%
+  full_join(
+    invert_2025_2026 %>%
+      select(
+        survey_id,
+        all_of(inverts)
+      ),
+    by = "survey_id"
+  )
+
+ki_2025_2026 %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_2025 = sum(year == 2025),
+    n_2026 = sum(year == 2026)
+  )
+
+names(ki_2025_2026)
+```
+
+##qaqc
+```{r}
+ki_2025_2026 <- ki_2025_2026 %>%
+  select(
+    survey_id,
+    year,
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    
+    # Grazers
+    all_of(grazers),
+    
+    # Kelp
+    all_of(kelp),
+    
+    # Inverts
+    all_of(inverts)
+  )
+
+dim(ki_2025_2026)
+
+names(ki_2025_2026)
+```
+
+```{r}
+ki_2025_2026 %>%
+  summarise(
+    across(
+      all_of(c(grazers, kelp, inverts)),
+      list(
+        n_NA = ~ sum(is.na(.)),
+        n_zero = ~ sum(. == 0, na.rm = TRUE)
+      )
+    )
+  )
+```
+
+```{r}
+ki_2025_2026 %>%
+  filter(
+    if_any(
+      all_of(c(grazers, kelp, inverts)),
+      is.na
+    )
+  ) %>%
+  select(
+    survey_id,
+    year,
+    date,
+    site,
+    plot_type,
+    arkev_unit
+  )
+```
+
+```{R}
+ki_2025_2026 <- ki_2025_2026 %>%
+  filter(
+    !if_any(
+      all_of(c(grazers, kelp, inverts)),
+      is.na
+    )
+  )
+
+ki_2025_2026 %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_2025 = sum(year == 2025),
+    n_2026 = sum(year == 2026),
+    n_sites = n_distinct(site)
+  )
+
+ki_2025_2026 %>%
+  summarise(
+    total_biological_NA = sum(
+      is.na(
+        across(
+          all_of(c(grazers, kelp, inverts))
+        )
+      )
+    )
+  )
+```
+
+```{r}
+ki_2025_2026 %>%
+  count(year, site)
+```
+
+##analysis
+```{r}
+ki_2025_2026 %>%
+  summarise(
+    n_NA = sum(
+      !is.finite(
+        as.matrix(
+          select(., all_of(c(grazers, kelp, inverts)))
+        )
+      )
+    )
+  )
+
+ki_2025_2026 %>%
+  select(all_of(c(grazers, kelp, inverts))) %>%
+  summarise(
+    across(
+      everything(),
+      ~ min(.x, na.rm = TRUE)
+    )
+  )
+
+ki_2025_2026 %>%
+  mutate(
+    total_abundance = rowSums(
+      select(., all_of(c(grazers, kelp, inverts)))
+    )
+  ) %>%
+  summarise(
+    n_zero_community = sum(total_abundance == 0),
+    n_surveys = n()
+  )
+```
+
+```{r}
+ki_2025_2026 %>%
+  mutate(
+    total_abundance = rowSums(
+      select(., all_of(c(grazers, kelp, inverts)))
+    )
+  ) %>%
+  filter(total_abundance == 0) %>%
+  count(year, site)
+
+ki_2025_2026 %>%
+  mutate(
+    total_abundance = rowSums(
+      select(., all_of(c(grazers, kelp, inverts)))
+    )
+  ) %>%
+  filter(total_abundance == 0) %>%
+  select(survey_id, year, date, site, plot_type, arkev_unit)
+```
+
+```{r}
+library(vegan)
+ki_permanova <- ki_2025_2026 %>%
+  mutate(
+    total_abundance = rowSums(
+      select(., all_of(c(grazers, kelp, inverts)))
+    )
+  ) %>%
+  filter(total_abundance > 0)
+
+community <- ki_permanova %>%
+  select(all_of(c(grazers, kelp, inverts)))
+
+sum(is.na(community))
+sum(!is.finite(as.matrix(community)))
+rowSums(community) %>% summary()
+```
+```{r}
+adonis2(
+  community ~ year * site,
+  data = ki_permanova,
+  method = "bray",
+  permutations = 999,
+  by = "terms"
+)
+```
+
+```{r}
+bray_dist <- vegdist(
+  community,
+  method = "bray"
+)
+
+dispersion <- betadisper(
+  bray_dist,
+  interaction(
+    ki_permanova$year,
+    ki_permanova$site
+  )
+)
+
+anova(dispersion)
+```
+
+```{r}
+taxon_change <- ki_2025_2026 %>%
+  group_by(site, year) %>%
+  summarise(
+    across(
+      all_of(c(grazers, kelp, inverts)),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = all_of(c(grazers, kelp, inverts)),
+    names_to = "taxon",
+    values_to = "mean_abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = mean_abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+```
+
+```{r}
+taxon_change %>%
+  group_by(site) %>%
+  arrange(desc(abs(change)), .by_group = TRUE)
+```
+
+
+```{r}
+taxon_tests <- ki_2025_2026 %>%
+  select(
+    year, site,
+    all_of(c(grazers, kelp, inverts))
+  ) %>%
+  pivot_longer(
+    cols = all_of(c(grazers, kelp, inverts)),
+    names_to = "taxon",
+    values_to = "abundance"
+  ) %>%
+  group_by(site, taxon) %>%
+  summarise(
+    test = list(wilcox.test(abundance ~ year, exact = FALSE)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    statistic = map_dbl(test, ~ unname(.x$statistic)),
+    p_value = map_dbl(test, ~ .x$p.value)
+  ) %>%
+  select(site, taxon, statistic, p_value) %>%
+  group_by(site) %>%
+  mutate(
+    p_adjusted = p.adjust(p_value, method = "BH")
+  ) %>%
+  ungroup() %>%
+  arrange(site, p_adjusted)
+
+taxon_tests
+```
+
+```{r}
+library(tidytext)
+plot_data <- taxon_change %>%
+  group_by(site) %>%
+  filter(
+    rank(change, ties.method = "min") <= 3|
+    rank(-change, ties.method = "min") <= 3
+  ) %>%
+  ungroup() %>%
+  mutate(
+    taxon = reorder_within(taxon, change, site)
+  )
+
+ggplot(
+  plot_data,
+  aes(x = taxon, y = change)
+) +
+  geom_col() +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  coord_flip() +
+  facet_wrap(~ site, scales = "free_y") +
+  scale_x_reordered() +
+  labs(
+    title = "Major changes in kelp, grazer, and invert abundance",
+    subtitle = "Six largest increases and decreases within each site",
+    x = NULL,
+    y = "Change in mean abundance (2026 − 2025)"
+  ) +
+  theme_classic()
+```
+
+```{r}
+major_taxa <- c(
+  "purple_urchins_<2cm",
+  "purple_urchins_>2cm",
+  "red_urchins",
+  "tegula",
+  "DESSPP",
+  "LAMR",
+  "NERJ",
+  "NERA",
+  "HALKAM",
+  "HALRUF",
+  "ALAMAR",
+  "COSCOS"
+)
+
+
+big_river_change <- taxon_change %>%
+  filter(
+    site == "Big River",
+    taxon %in% major_taxa
+  ) %>%
+  mutate(
+    taxon = fct_reorder(taxon, change)
+  )
+
+plot_data <- plot_data %>%
+  mutate(
+    taxon_label = case_when(
+      taxon == "purple_urchins_<2cm" ~ "Purple urchins <2 cm",
+      taxon == "purple_urchins_>2cm" ~ "Purple urchins >2 cm",
+      taxon == "red_urchins" ~ "Red urchins",
+      taxon == "tegula" ~ "Tegula",
+      TRUE ~ taxon
+    )
+  )
+
+ggplot(
+  plot_data,
+  aes(x = taxon_label, y = change)
+) +
+  geom_col() +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  coord_flip() +
+  facet_wrap(
+    ~ site,
+    scales = "free_x"
+  ) +
+  labs(
+    title = "Major changes in kelp, grazer, and invert abundance",
+    subtitle = "Change in mean abundance from 2025 to 2026",
+    x = NULL,
+    y = "Change in mean abundance"
+  ) +
+  theme_classic()
+```
+
+```{r}
+community_taxa <- c(
+  grazers,
+  kelp,
+  inverts
+)
+
+ki_relative <- ki_permanova %>%
+  mutate(
+    total_abundance = rowSums(
+      across(all_of(community_taxa)),
+      na.rm = TRUE
+    )
+  ) %>%
+  mutate(
+    across(
+      all_of(community_taxa),
+      ~ if_else(
+        total_abundance > 0,
+        .x / total_abundance,
+        0
+      )
+    )
+  )
+
+ki_relative %>%
+  mutate(
+    relative_total = rowSums(
+      across(all_of(community_taxa))
+    )
+  ) %>%
+  summarise(
+    min_total = min(relative_total),
+    max_total = max(relative_total),
+    n_not_one = sum(abs(relative_total - 1) > 1e-6)
+  )
+```
+
+```{r}
+relative_summary <- ki_relative %>%
+  group_by(site, year) %>%
+  summarise(
+    across(
+      all_of(community_taxa),
+      mean,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = all_of(community_taxa),
+    names_to = "taxon",
+    values_to = "relative_abundance"
+  )
+
+relative_summary <- relative_summary %>%
+  mutate(
+    relative_abundance = relative_abundance * 100
+  )
+```
+
+```{r}
+dominant_taxa <- relative_summary %>%
+  group_by(taxon) %>%
+  summarise(
+    mean_relative_abundance = mean(
+      relative_abundance,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(mean_relative_abundance))
+```
+
+```{r}
+major_taxa <- dominant_taxa %>%
+  filter(mean_relative_abundance >= 1) %>%
+  pull(taxon)
+
+relative_major <- relative_summary %>%
+  mutate(
+    taxon = if_else(
+      taxon %in% major_taxa,
+      taxon,
+      "Other"
+    )
+  ) %>%
+  group_by(site, year, taxon) %>%
+  summarise(
+    relative_abundance = sum(
+      relative_abundance,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(
+  relative_major,
+  aes(
+    x = factor(year),
+    y = relative_abundance,
+    fill = taxon
+  )
+) +
+  geom_col() +
+  facet_wrap(~ site) +
+  labs(
+    title = "Relative community composition",
+    subtitle = "Major taxa and combined rare taxa",
+    x = "Year",
+    y = "Relative abundance (%)",
+    fill = "Taxon"
+  ) +
+  theme_classic()
+```
+
+##changes in den across years
+```{r}
+ki_density <- ki_permanova %>%
+  mutate(
+    across(
+      all_of(c(grazers, kelp, inverts)),
+      ~ .x / 3.14
+    )
+  )
+```
+
+```{r}
+density_change <- ki_density %>%
+  group_by(site, year) %>%
+  summarise(
+    across(
+      all_of(c(grazers, kelp, inverts)),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = all_of(c(grazers, kelp, inverts)),
+    names_to = "taxon",
+    values_to = "density"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = density,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+density_change
+```
+
+```{r}
+den_taxa <- c(
+  "purple_urchins_<2cm",
+  "purple_urchins_>2cm",
+  "red_urchins",
+  "tegula",
+  "DESSPP",
+  "LAMR",
+  "NERJ",
+  "NERA",
+  "HALKAM",
+  "HALRUF"
+)
+
+density_change <- density_change %>%
+  filter(
+    taxon %in% den_taxa
+  ) %>%
+  mutate(
+    taxon = fct_reorder(taxon, change)
+  )
+
+density_change <- density_change %>%
+  mutate(
+    taxon_label = case_when(
+      taxon == "purple_urchins_<2cm" ~ "Purple urchins <2 cm",
+      taxon == "purple_urchins_>2cm" ~ "Purple urchins >2 cm",
+      taxon == "red_urchins" ~ "Red urchins",
+      taxon == "tegula" ~ "Tegula",
+      TRUE ~ taxon
+    )
+  )
+
+density_change %>%
+  filter(abs(change) >= 0.05)
+
+ggplot(density_change,
+    aes(x = taxon_label,y = change)   
+   )+
+  geom_col() +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  coord_flip() +
+  facet_wrap(
+    ~ site,
+    scales = "free_x"
+  ) +
+  labs(
+    title = "Changes in taxon density",
+    subtitle = "Change in mean density from 2025 to 2026",
+    x = NULL,
+    y = "Change in mean density (individuals/m²)"
+  ) +
+  theme_classic()
+
+```
+
+```{r}
+community_taxa <- c(grazers, kelp, inverts)
+
+ki_metrics <- ki_permanova %>%
+  mutate(
+    total_abundance = rowSums(
+      select(., all_of(community_taxa))
+    )
+  ) %>%
+  mutate(
+    across(
+      all_of(community_taxa),
+      ~ .x / 3.14,
+      .names = "{.col}_density"
+    )
+  ) %>%
+  mutate(
+    across(
+      all_of(community_taxa),
+      ~ .x / total_abundance * 100,
+      .names = "{.col}_relative"
+    )
+  )
+```
+
+```{r}
+density_relative_change <- ki_metrics %>%
+  group_by(site, year) %>%
+  summarise(
+    across(
+      all_of(community_taxa),
+      ~ mean(.x, na.rm = TRUE),
+      .names = "{.col}_abundance"
+    ),
+    across(
+      all_of(paste0(community_taxa, "_density")),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    across(
+      all_of(paste0(community_taxa, "_relative")),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  )
+
+density_relative_change <- ki_metrics %>%
+  group_by(site, year) %>%
+  summarise(
+    across(
+      all_of(community_taxa),
+      ~ mean(.x, na.rm = TRUE),
+      .names = "{.col}_abundance"
+    ),
+    across(
+      all_of(community_taxa),
+      ~ mean(.x / 3.14, na.rm = TRUE),
+      .names = "{.col}_density"
+    ),
+    across(
+      all_of(community_taxa),
+      ~ mean(.x / total_abundance * 100, na.rm = TRUE),
+      .names = "{.col}_relative"
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = -c(site, year),
+    names_to = c("taxon", "metric"),
+    names_pattern = "(.+)_(abundance|density|relative)$",
+    values_to = "value"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = value,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+```
+
+```{r}
+density_relative_change <- density_relative_change %>%
+  filter(metric %in% c("density", "relative"))
+```
+
+
+```{r}
+density_relative_plot <- density_relative_change %>%
+  select(site, taxon, metric, change) %>%
+  pivot_wider(
+    names_from = metric,
+    values_from = change
+  )
+
+density_relative_plot
+```
+
+```{r}
+library(ggrepel)
+
+ggplot(
+  density_relative_plot,
+  aes(
+    x = density,
+    y = relative
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+  geom_point(size = 3) +
+  geom_text_repel(
+    aes(label = taxon),
+    size = 3,
+    max.overlaps = Inf
+  ) +
+  facet_wrap(~ site) +
+  labs(
+    title = "Changes in density and relative community importance",
+    subtitle = "Change in mean density vs. change in relative abundance, 2025–2026",
+    x = "Change in mean density (individuals/m²)",
+    y = "Change in relative abundance (percentage points)"
+  ) +
+  theme_classic()
+```
+
+```{r}
+major_taxa <- c(
+  "purple_urchins_<2cm",
+  "purple_urchins_>2cm",
+  "red_urchins",
+  "tegula",
+  "PATMIN",
+  "HALKAM",
+  "HALRUF",
+  "LAMR",
+  "NERJ",
+  "NERA",
+  "DESSPP"
+)
+
+density_relative_plot %>%
+  mutate(
+    label = if_else(
+      taxon %in% major_taxa,
+      taxon,
+      NA_character_
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = density,
+      y = relative
+    )
+  ) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+  geom_point(
+    size = 2.5
+  ) +
+  geom_text_repel(
+    aes(label = label),
+    size = 3.5,
+    max.overlaps = Inf,
+    box.padding = 0.5,
+    point.padding = 0.3
+  ) +
+  facet_wrap(~ site) +
+  labs(
+    title = "Changes in density and relative community importance",
+    subtitle = "Change in mean density vs. change in relative abundance, 2025–2026",
+    x = "Change in mean density (individuals/m²)",
+    y = "Change in relative abundance (percentage points)"
+  ) +
+  theme_classic()
+```
+
+```{r}
+library(dplyr)
+library(vegan)
+
+ki_grazer_kelp <- ki_density %>%
+  mutate(
+    grazer_density = rowSums(
+      select(., all_of(grazers)),
+      na.rm = TRUE
+    ),
+    kelp_density = rowSums(
+      select(., all_of(kelp)),
+      na.rm = TRUE
+    )
+  )
+ggplot(
+  ki_grazer_kelp,
+  aes(
+    x = grazer_density,
+    y = kelp_density
+  )
+) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE
+  ) +
+  facet_wrap(~ site) +
+  labs(
+    title = "Grazer density and kelp density",
+    subtitle = "Survey-level relationship across 2025–2026",
+    x = "Grazer density (individuals/m²)",
+    y = "Kelp density (individuals/m²)"
+  ) +
+  theme_classic()
+
+```
+
+```{r}
+kelp_density_model <- lm(
+  kelp_density ~ grazer_density + year + site,
+  data = ki_grazer_kelp
+)
+
+summary(kelp_density_model)
+```
+
+```{r}
+ki_kelp_composition <- ki_grazer_kelp %>%
+  filter(kelp_density > 0)
+
+kelp_community <- ki_kelp_composition %>%
+  select(all_of(kelp))
+
+rowSums(kelp_community) %>% summary()
+```
+
+```{r}
+adonis2(
+  kelp_community ~ grazer_density + year + site,
+  data = ki_kelp_composition,
+  method = "bray",
+  permutations = 999,
+  by = "terms"
+)
+```
+
+```{r}
+adonis2(
+  kelp_community ~ grazer_density * year + site,
+  data = ki_kelp_composition,
+  method = "bray",
+  permutations = 999,
+  by = "terms"
+)
+```
+
+```{r}
+ki_grazer_kelp <- ki_grazer_kelp %>%
+  mutate(
+    kelp_present = if_else(kelp_density > 0, 1, 0)
+  )
+```
+
+```{r}
+kelp_presence_model <- glm(
+  kelp_present ~ grazer_density + factor(year) + site,
+  data = ki_grazer_kelp,
+  family = binomial
+)
+
+summary(kelp_presence_model)
+```
+
+
+```{r}
+ki_kelp_present <- ki_grazer_kelp %>%
+  filter(kelp_density > 0)
+
+kelp_density_model <- lm(
+  kelp_density ~ grazer_density * factor(year) + site,
+  data = ki_kelp_present
+)
+
+summary(kelp_density_model)
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Create a sequence spanning the observed grazer-density range
+pred_data <- expand.grid(
+  grazer_density = seq(
+    min(ki_grazer_kelp$grazer_density, na.rm = TRUE),
+    max(ki_grazer_kelp$grazer_density, na.rm = TRUE),
+    length.out = 100
+  ),
+  year = c(2025, 2026),
+  site = c("Big River", "Noyo")
+)
+
+# Predicted probability of kelp presence
+pred_data$prob_kelp <- predict(
+  kelp_presence_model,
+  newdata = pred_data,
+  type = "response"
+)
+```
+
+```{r}
+ggplot(
+  pred_data,
+  aes(
+    x = grazer_density,
+    y = prob_kelp,
+    linetype = factor(year),
+    color = site
+  )
+) +
+  geom_line(linewidth = 1) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  scale_color_manual(
+    values = c(
+      "Noyo" = "#0072B2",
+      "Big River" = "#E69F00"))+
+  labs( title = ""
+    x = "Grazer density (individuals / m²)",
+    y = "Predicted probability of kelp presence",
+    linetype = "Year"
+  ) +
+  theme_classic(base_size = 13)
+```
+
+```{r}
+library(dplyr)
+library(purrr)
+library(broom)
+
+ki_kelp_taxa <- ki_2025_2026 %>%
+  mutate(
+    grazer_density = rowSums(
+      select(., all_of(grazers))
+    ) / 3.14
+  )
+
+kelp_taxon_models <- map_dfr(kelp, function(taxon) {
+
+  dat <- ki_kelp_taxa %>%
+    select(
+      taxon_density = all_of(taxon),
+      grazer_density,
+      year,
+      site
+    ) %>%
+    mutate(
+      year = factor(year)
+    )
+
+  model <- lm(
+    taxon_density ~ grazer_density * year + site,
+    data = dat
+  )
+
+  tidy(model) %>%
+    filter(
+      term %in% c(
+        "grazer_density",
+        "year2026",
+        "siteNoyo",
+        "grazer_density:year2026"
+      )
+    ) %>%
+    mutate(taxon = taxon)
+})
+
+kelp_taxon_models
+```
+
+```{r}
+library(tidyverse)
+
+sig_kelp <- c(
+  "NERA",
+  "NERJ",
+  "DESSPP"
+)
+
+kelp_plot_data <- ki_kelp_taxa %>%
+  select(
+    year,
+    site,
+    grazer_density,
+    all_of(sig_kelp)
+  ) %>%
+  pivot_longer(
+    cols = all_of(sig_kelp),
+    names_to = "taxon",
+    values_to = "kelp_density"
+  ) %>%
+  mutate(
+    year = factor(year),
+    taxon = factor(
+      taxon,
+      levels = sig_kelp,
+      labels = c(
+        "NERA",
+        "NERJ",
+        "DESSPP"
+      )
+    )
+  )
+
+ggplot(
+  kelp_plot_data,
+  aes(
+    x = grazer_density,
+    y = kelp_density
+  )
+) +
+  
+  geom_point(
+    aes(shape = year),
+    alpha = 0.45,
+    size = 2
+  ) +
+  
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    color = "black",
+    linewidth = 0.8
+  ) +
+  
+  facet_wrap(
+    ~ taxon,
+    scales = "free_y",
+    ncol = 3
+  ) +
+  
+  labs(
+    title = "Kelp taxa associated with grazer density",
+    subtitle = "Taxa with significant negative grazer-density relationships",
+    x = "Grazer density (individuals / m²)",
+    y = "Kelp density (individuals / m²)",
+    shape = "Year"
+  ) +
+  
+  theme_classic(base_size = 13) +
+  
+  theme(
+    strip.background = element_rect(
+      fill = "white",
+      color = "black"
+    ),
+    strip.text = element_text(
+      size = 12
+    ),
+    legend.position = "top",
+    plot.title = element_text(
+      face = "bold"
+    )
+  )
+```
+
+```{r}
+library(tidyverse)
+
+ki_kelp_density <- ki_kelp_taxa %>%
+  mutate(
+    kelp_density = rowSums(
+      select(., all_of(kelp))
+    )
+  )
+
+ggplot(
+  ki_kelp_density,
+  aes(
+    x = grazer_density,
+    y = kelp_density,
+    shape = factor(year)
+  )
+) +
+  
+  geom_point(
+    alpha = 0.45,
+    size = 2.5
+  ) +
+  
+  geom_smooth(
+    aes(group = 1),
+    method = "lm",
+    se = TRUE,
+    color = "black",
+    linewidth = 0.9
+  ) +
+  
+  facet_wrap(~ site) +
+  
+  labs(
+    title = "Kelp density in relation to grazer density",
+    x = "Grazer density (individuals / m²)",
+    y = "Total kelp density (individuals / m²)",
+    shape = "Year"
+  ) +
+  
+  theme_classic(base_size = 13) +
+  
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+```{R}
+library(tidyverse)
+
+four_kelp <- c(
+  "NERA",
+  "NERJ",
+  "DESSPP"
+)
+
+plot_dat <- ki_2025_2026 %>%
+  mutate(
+    grazer_density = rowSums(
+      select(., all_of(grazers))
+    ) / 3.14
+  ) %>%
+  select(
+    site,
+    year,
+    grazer_density,
+    all_of(four_kelp)
+  ) %>%
+  pivot_longer(
+    cols = all_of(four_kelp),
+    names_to = "taxon",
+    values_to = "kelp_density"
+  ) %>%
+  mutate(
+    taxon = factor(
+      taxon,
+      levels = c("NERA", "NERJ", "DESSPP")
+    ),
+    year = factor(year)
+  )
+
+ggplot(
+  plot_dat,
+  aes(
+    x = grazer_density,
+    y = kelp_density,
+    shape = year
+  )
+) +
+
+  geom_point(
+    alpha = 0.40,
+    size = 1.8
+  ) +
+
+  # Same relationship estimated separately by year
+  geom_smooth(
+    aes(
+      linetype = year
+    ),
+    method = "lm",
+    se = TRUE,
+    color = "black",
+    linewidth = 0.7
+  ) +
+
+  facet_grid(
+    rows = vars(taxon),
+    cols = vars(site),
+    scales = "free_y",
+    switch = "y"
+  ) +
+
+  labs(
+    title = "Kelp density in relation to grazer density",
+    subtitle = "Kelp taxa with significant negative grazer-density relationships",
+    x = "Grazer density (individuals / m²)",
+    y = "Kelp density (individuals / m²)",
+    shape = "Year",
+    linetype = "Year"
+  ) +
+
+  theme_classic(base_size = 13) +
+
+  theme(
+    strip.background = element_rect(
+      color = "black",
+      fill = "white"
+    ),
+
+    strip.placement = "outside",
+
+    strip.text = element_text(
+      size = 11
+    ),
+
+    plot.title = element_text(
+      face = "bold",
+      size = 16
+    ),
+
+    plot.subtitle = element_text(
+      size = 12
+    ),
+
+    legend.position = "top",
+
+    panel.spacing = unit(0.8, "lines")
+  )
+```
+
+
+##cover
