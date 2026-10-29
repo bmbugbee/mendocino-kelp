@@ -4,9 +4,10 @@ output: html_document
 date: "2026-09-02"
 ---
 
+#2026 data
 ```{r}
 library(googlesheets4)
-
+library(tidyverse)
 fish = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=1772713005#gid=1772713005', sheet = 1)
 ki = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=1772713005#gid=1772713005', sheet = 2)
 cover = read_sheet('https://docs.google.com/spreadsheets/d/1T3TNqTVI4zFGS-up--IIOSRfn0fsBx5Dj7zEeDEAiCQ/edit?gid=1772713005#gid=1772713005', sheet = 3)
@@ -507,7 +508,8 @@ invert_2025_wide %>%
 ```
 
 
-#combine 2025 and 2026
+#grazers inverts and kelp
+##combine 2025-2026
 ##match species code
 ```{r}
 #grazers
@@ -2075,4 +2077,509 @@ ggplot(
 ```
 
 
-##cover
+#cover
+```{r}
+#bring down from top
+library(tidyverse)
+surveys_2025 = read_sheet('https://docs.google.com/spreadsheets/d/1i3KlFK9ZlCHW7vNudpcN0kkriUDP4IahfxkR6CVGroQ/edit?gid=0#gid=0')
+
+surveys_2025 <- surveys_2025 %>%
+  mutate(
+    date = as.Date(
+      paste(year, month, day, sep = "-")
+    )
+  )
+
+surveys_2025 %>%
+  mutate( 
+    site = str_to_lower(str_trim(site)),
+    ARKEV_type = str_to_lower(str_trim(plot_type)),
+    ARKEV_unit = str_trim(ARKEV_unit),
+    data_type = str_to_lower(str_trim(data_type)),
+    species_code = str_to_upper(str_trim(species_code))
+    )
+
+survey_key_2025 <- c(
+  "year",
+  "date",
+  "site",
+  "ARKEV_type",
+  "ARKEV_unit"
+)
+
+surveys_2025 %>%
+  count(data_type, sort = TRUE)
+surveys_2025 %>%
+  count(data_type, species_code, sort = TRUE)
+
+surveys_2025 <- surveys_2025 %>%
+  mutate(
+    count_num = as.numeric(unlist(count)),
+    percent_num = as.numeric(unlist(percent))
+  )
+
+surveys_2025 %>%
+  summarise(
+    count_class = class(count_num),
+    n_missing = sum(is.na(count_num))
+  )
+
+surveys_2025 <- surveys_2025 %>%
+  rename(arkev_unit = ARKEV_unit) %>%
+  mutate(year = 2025)
+
+surveys_2025 <- surveys_2025 %>%
+  mutate(
+    survey_id = paste(
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      sep = "_"
+    )
+  )
+```
+
+```{r}
+cover_2025 <- surveys_2025 %>%
+  filter(data_type == 'algal_cover',
+    month != "4") %>%
+  mutate(
+    taxon = case_when(
+      species_code == "CRUCOR" ~ "CCA",
+      species_code == "ARTCOR" ~ "ACA",
+      species_code == "ENCRED" ~ "ER",
+      species_code %in% c("BR", "BAREROCK") ~ "BR",
+      species_code == "TURF" ~ "turf",
+      species_code == "FLESHY" ~ "FLESHY",
+      species_code == "SCUM" ~ "SCUM",
+      species_code == "BS" ~ "SAND",
+      TRUE ~ NA_character_
+    ),
+    cover = as.numeric(percent)
+  ) %>%
+  filter(!is.na(taxon))%>%
+  group_by(survey_id, year, date, site, plot_type, arkev_unit, taxon) %>%
+  summarise(
+    cover_raw = sum(cover, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+cover_2025 %>%
+  count(year, site, taxon)
+
+sum(is.na(cover_2025$cover))
+
+cover_2025 %>%
+  summarise(
+    min_cover = min(cover_raw, na.rm = TRUE),
+    max_cover = max(cover_raw, na.rm = TRUE)
+  )
+```
+
+```{r}
+cover_2025_adj <- cover_2025 %>%
+  group_by(
+    survey_id, year, date, site, plot_type, arkev_unit
+  ) %>%
+  mutate(
+    # Underlying algal cover before adjustment
+    underlying_cover = sum(
+      cover_raw[taxon %in% c("CCA", "ACA", "ER", "BR", "turf")],
+      na.rm = TRUE
+    ),
+
+    # Sand is substrate, so this is the available hard substrate
+    hard_substrate = 100 - sum(
+      cover_raw[taxon == "SAND"],
+      na.rm = TRUE
+    ),
+
+    # Only scale surveys where underlying cover exceeds
+    # the available hard substrate.
+    scale_factor = if_else(
+      underlying_cover > hard_substrate &
+        underlying_cover > 0,
+      hard_substrate / underlying_cover,
+      1
+    ),
+
+    # Scale ALL organisms associated with hard substrate.
+    # FLESHY and SCUM remain separate superlayers.
+    cover_clean = cover_raw * scale_factor
+  ) %>%
+  ungroup()
+
+cover_2025_survey <- cover_2025_adj %>%
+  group_by(
+    survey_id, year, date, site, plot_type, arkev_unit
+  ) %>%
+  summarise(
+    CCA = sum(cover_clean[taxon == "CCA"], na.rm = TRUE),
+    ACA = sum(cover_clean[taxon == "ACA"], na.rm = TRUE),
+    ER = sum(cover_clean[taxon == "ER"], na.rm = TRUE),
+    BR = sum(cover_clean[taxon == "BR"], na.rm = TRUE),
+    turf = sum(cover_clean[taxon == "turf"], na.rm = TRUE),
+
+    FLESHY = sum(cover_clean[taxon == "FLESHY"], na.rm = TRUE),
+    SCUM = sum(cover_clean[taxon == "SCUM"], na.rm = TRUE),
+
+    SAND = sum(cover_raw[taxon == "SAND"], na.rm = TRUE),
+
+    .groups = "drop"
+  )
+
+cover_2025_survey %>%
+  mutate(
+    algal_cover = CCA + ACA + ER + BR + turf,
+    hard_substrate = 100 - SAND,
+    difference = algal_cover - hard_substrate
+  ) %>%
+  summarise(
+    n_surveys = n(),
+    n_over_hard_substrate = sum(
+      difference > 0.001,
+      na.rm = TRUE
+    ),
+    min_algal = min(algal_cover, na.rm = TRUE),
+    median_algal = median(algal_cover, na.rm = TRUE),
+    mean_algal = mean(algal_cover, na.rm = TRUE),
+    max_algal = max(algal_cover, na.rm = TRUE)
+  )
+```
+
+```{r}
+cover_2025_survey %>%
+  mutate(
+    algal_cover = CCA + ACA + ER + BR + turf
+  ) %>%
+  select(
+    survey_id, site, plot_type, arkev_unit,
+    algal_cover, SAND, FLESHY, SCUM
+  ) %>%
+  summarise(
+    cor_algal_sand = cor(algal_cover, SAND, use = "complete.obs"),
+    mean_algal = mean(algal_cover, na.rm = TRUE),
+    mean_sand = mean(SAND, na.rm = TRUE),
+    mean_fleshy = mean(FLESHY, na.rm = TRUE),
+    mean_scum = mean(SCUM, na.rm = TRUE)
+  )
+```
+
+```{r}
+cover_2025_survey %>%
+  mutate(
+    algal_cover = CCA + ACA + ER + BR + turf,
+    sand_bin = case_when(
+      SAND == 0 ~ "0% sand",
+      SAND > 0 & SAND <= 20 ~ "1–20% sand",
+      SAND > 20 & SAND <= 50 ~ "21–50% sand",
+      SAND > 50 ~ ">50% sand",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  group_by(sand_bin) %>%
+  summarise(
+    n = n(),
+    mean_algal = mean(algal_cover, na.rm = TRUE),
+    median_algal = median(algal_cover, na.rm = TRUE),
+    min_algal = min(algal_cover, na.rm = TRUE),
+    max_algal = max(algal_cover, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r}
+cover_2025_survey %>%
+  summarise(
+    min_fleshy = min(FLESHY, na.rm = TRUE),
+    median_fleshy = median(FLESHY, na.rm = TRUE),
+    mean_fleshy = mean(FLESHY, na.rm = TRUE),
+    max_fleshy = max(FLESHY, na.rm = TRUE),
+
+    min_scum = min(SCUM, na.rm = TRUE),
+    median_scum = median(SCUM, na.rm = TRUE),
+    mean_scum = mean(SCUM, na.rm = TRUE),
+    max_scum = max(SCUM, na.rm = TRUE)
+  )
+
+cover_2025_survey %>%
+  summarise(
+    n_fleshy = sum(FLESHY > 0, na.rm = TRUE),
+    n_scum = sum(SCUM > 0, na.rm = TRUE),
+    n_neither = sum(FLESHY == 0 & SCUM == 0, na.rm = TRUE)
+  )
+
+cover_2025_survey %>%
+  summarise(
+    n_fleshy_only = sum(FLESHY > 0 & SCUM == 0),
+    n_scum_only = sum(FLESHY == 0 & SCUM > 0),
+    n_both = sum(FLESHY > 0 & SCUM > 0),
+    n_neither = sum(FLESHY == 0 & SCUM == 0)
+  )
+```
+
+
+
+
+```{r}
+cover_2025_survey %>%
+  mutate(
+    underlying_cover = CCA + ACA + ER + BR + turf,
+    hard_substrate = 100 - SAND,
+    excess = underlying_cover - hard_substrate
+  ) %>%
+  summarise(
+    n_surveys = n(),
+    n_underlying_gt_hard =
+      sum(excess > 0.001, na.rm = TRUE),
+
+    n_fleshy_gt_100 =
+      sum(FLESHY > 100.001, na.rm = TRUE),
+
+    n_scum_gt_100 =
+      sum(SCUM > 100.001, na.rm = TRUE)
+  )
+
+```
+
+
+
+
+
+
+
+```{r}
+cover_2026 <- cover %>%
+  mutate(
+    survey_id = paste(
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      sep = "_"
+    )
+  ) %>%
+  mutate(
+    across(
+      c(FR, ER, CCA, ACA, FG, brown, turf, scum, BR, SAND),
+      ~ as.numeric(unlist(.))
+    )
+  ) %>%
+  transmute(
+    year,
+    month,
+    date,
+    survey_id,
+    site = str_to_lower(str_trim(site)),
+    plot_type = str_to_lower(str_trim(plot_type)),
+    arkev_unit = str_trim(arkev_unit),
+    CCA,
+    ACA,
+    ER,
+    BR,
+    turf,
+    FLESHY = rowSums(
+      cbind(FR, FG, brown),
+      na.rm = TRUE
+    ),
+    SCUM = scum,
+    SAND
+  ) %>%
+  mutate(
+    # underlying algal layer only
+    algal_cover = CCA + ACA + ER + BR + turf
+  )
+```
+
+```{r}
+cover_2026 %>%
+  summarise(
+    n_surveys = n(),
+    min_algal = min(algal_cover, na.rm = TRUE),
+    median_algal = median(algal_cover, na.rm = TRUE),
+    mean_algal = mean(algal_cover, na.rm = TRUE),
+    max_algal = max(algal_cover, na.rm = TRUE),
+    n_over_100 = sum(algal_cover > 100.001, na.rm = TRUE)
+  )
+```
+
+
+
+##combine 2025-2026 cover
+```{r}
+cover_compare <- bind_rows(
+  
+  cover_2025_survey %>%
+    transmute(
+      year,
+      survey_id,
+      date,
+      site = str_to_lower(str_trim(site)),
+      plot_type = str_to_lower(str_trim(plot_type)),
+      arkev_unit = str_trim(arkev_unit),
+      CCA,
+      ACA,
+      ER,
+      BR,
+      turf,
+      algal_cover = CCA + ACA + ER + BR + turf,
+      FLESHY,
+      SCUM,
+      SAND
+    ),
+  
+  cover_2026 %>%
+    transmute(
+      year,
+      survey_id,
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      CCA,
+      ACA,
+      ER,
+      BR,
+      turf,
+      algal_cover,
+      FLESHY,
+      SCUM,
+      SAND
+    )
+)
+
+head(cover_compare)
+```
+
+```{R}
+cover_compare %>%
+  count(year, plot_type)
+
+cover_compare %>%
+  group_by(year, plot_type) %>%
+  summarise(
+    n = n(),
+    mean_algal = mean(algal_cover, na.rm = TRUE),
+    median_algal = median(algal_cover, na.rm = TRUE),
+    sd_algal = sd(algal_cover, na.rm = TRUE),
+    min_algal = min(algal_cover, na.rm = TRUE),
+    max_algal = max(algal_cover, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{R}
+cover_compare %>%
+  group_by(year, plot_type) %>%
+  summarise(
+    mean_algal = mean(algal_cover, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(
+  cover_compare,
+  aes(
+    x = factor(year),
+    y = algal_cover,
+    fill = plot_type
+  )
+) +
+  geom_boxplot(
+    position = position_dodge(width = 0.8),
+    outlier.alpha = 0.3
+  ) +
+  labs(
+    x = "Year",
+    y = "Underlying algal cover (%)",
+    fill = "Plot type"
+  ) +
+  theme_classic()
+```
+
+```{r}
+cover_compare %>%
+  mutate(
+    sand_class = case_when(
+      year == 2026 ~ "2026",
+      year == 2025 & SAND == 0 ~ "2025: 0% sand",
+      year == 2025 & SAND > 0 ~ "2025: >0% sand",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  group_by(year, plot_type, sand_class) %>%
+  summarise(
+    n = n(),
+    mean_algal = mean(algal_cover, na.rm = TRUE),
+    median_algal = median(algal_cover, na.rm = TRUE),
+    sd_algal = sd(algal_cover, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r}
+cover_compare %>%
+  mutate(
+    comparison_group = case_when(
+      year == 2025 & SAND == 0 ~ "2025: 0% sand",
+      year == 2026 ~ "2026",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(comparison_group)) %>%
+  ggplot(
+    aes(
+      x = comparison_group,
+      y = algal_cover,
+      fill = plot_type
+    )
+  ) +
+  geom_boxplot(
+    position = position_dodge(width = 0.8),
+    outlier.alpha = 0.3
+  ) +
+  labs(
+    x = NULL,
+    y = "Underlying algal cover (%)",
+    fill = "Plot type"
+  ) +
+  theme_classic()
+```
+
+
+#fish
+```{r}
+fish_2025 <- surveys_2025 %>%
+  filter(data_type == c('fish_on', 'fish_off')) 
+  mutate(
+    taxon = case_when(
+      species_code == "CRUCOR" ~ "CCA",
+      species_code == "ARTCOR" ~ "ACA",
+      species_code == "ENCRED" ~ "ER",
+      species_code %in% c("BR", "BAREROCK") ~ "BR",
+      species_code == "TURF" ~ "turf",
+      species_code == "FLESHY" ~ "FLESHY",
+      TRUE ~ NA_character_
+    ),
+    cover = as.numeric(percent)
+  ) %>%
+  filter(!is.na(taxon))
+
+cover_2025 %>%
+  count(year, site, taxon)
+
+sum(is.na(cover_2025$cover))
+
+cover_2025 %>%
+  summarise(
+    min_cover = min(cover, na.rm = TRUE),
+    max_cover = max(cover, na.rm = TRUE)
+  )
+
+
+##Kelp on ARKEV
+```{r}
+days_until_reproductive = mean((45+49+37+50)/4)
+days_until_reproductive
+```
+

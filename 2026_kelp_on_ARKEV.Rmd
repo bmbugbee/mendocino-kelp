@@ -4,8 +4,6 @@ output: html_document
 date: "2026-07-29"
 ---
 
-
-
 ```{r}
 #installing packages
 library(dplyr)
@@ -418,7 +416,7 @@ kelp_site_analysis <- koa_master %>%
   )
 
 kelp_model_sites <- lmer(
-  kelp_on_ARKEV ~ site * days_since_outplanting + ARKEV_type + (1 | ARKEV_unit), data = kelp_site_analysis, REML = TRUE)
+  kelp_on_ARKEV ~ site * days_since_outplanting + ARKEV_type + (1 | ARKEV_unit), data = kelp_site_analysis, REML = FALSE)
 
 anova(kelp_model_sites)
 ```
@@ -428,7 +426,7 @@ anova(kelp_model_sites)
 kelp_model_sites_quad <- lmer(
   kelp_on_ARKEV ~ site * (days_since_outplanting + I(days_since_outplanting^2)) + ARKEV_type + (1 | ARKEV_unit),
   data = kelp_site_analysis,
-  REML = TRUE
+  REML = FALSE
 )
 
 # Compare models
@@ -645,7 +643,7 @@ ggplot(stipe_data,aes(x = date, y = avg_length_type, color = site, linetype = AR
     y = "Average Stipe Length (cm)",
     color = "Site",
     linetype = "ARKEV Type") +
-  theme_bw() +
+  theme_classic() +
   theme(
     axis.text.x = element_text(size = 15, face = "bold"),
     axis.text.y = element_text(size = 15, face = "bold"),
@@ -896,12 +894,32 @@ stipe_growth_day <- stipe_arkev %>%
 growth_model_midpoint <- lmer(
   growth_rate_cm_day ~
     site * days_since_outplanting_midpoint +
-    (1 | ARKEV_unit),
+    (1 | site:ARKEV_unit),
   data = stipe_growth_day,
   REML = TRUE
 )
 
 anova(growth_model_midpoint)
+
+growth_trends <- emtrends(
+  growth_model_midpoint,
+  ~ site,
+  var = "days_since_outplanting_midpoint"
+)
+
+growth_trends
+
+pairs(growth_trends, adjust = "tukey")
+```
+```{r}
+stipe_growth_day %>%
+  group_by(site) %>%
+  summarise(
+    n_observations = n(),
+    n_units = n_distinct(ARKEV_unit),
+    n_timepoints = n_distinct(days_since_outplanting_midpoint),
+    .groups = "drop"
+  )
 ```
 
 ```{r}
@@ -925,12 +943,11 @@ growth_pred <- emmeans(
   growth_model_midpoint,
   ~ site | days_since_outplanting_midpoint,
   at = list(
-    days_since_outplanting_midpoint =
-      seq(
-        min(stipe_growth$days_since_outplanting_midpoint, na.rm = TRUE),
-        max(stipe_growth$days_since_outplanting_midpoint, na.rm = TRUE),
-        length.out = 200
-      )
+    days_since_outplanting_midpoint = seq(
+      min(stipe_growth_day$days_since_outplanting_midpoint, na.rm = TRUE),
+      max(stipe_growth_day$days_since_outplanting_midpoint, na.rm = TRUE),
+      length.out = 200
+    )
   )
 ) %>%
   as.data.frame()
@@ -1060,162 +1077,3 @@ ggplot() +  geom_ribbon(data = pred_data, aes(x = midpoint_date, ymin = lower, y
 
 
 
-```{r}
-koa_noyo <- koa_master %>%
-  select(site == "noyo")
-
-koa_1 <- koa_noyo %>%
-  filter(date == "2026-05-25") %>%
-  dplyr::select(date,site,ARKEV_type, ARKEV_unit,kelp_on_ARKEV)
-
-koa_1 <- data.frame(
-  ARKEV_type = c(rep("PVC", 40), rep("WOOD", 10)),
-  kelp_on_ARKEV = c(
-    9, 10, 9, 8, 4, 8, 7, 9, 6, 6, 6, 8, 9, 9, 8, 9, 9, 10, 8, 9,
-    7, 4, 9, 8, 10, 7, 5, 7, 8, 8, 6, 7, 6, 6, 3, 7, 8, 5, 8, 7,  # PVC
-    1, 4, 1, 4, 0, 6, 0, 0, 0, 1))                                    # WOOD
-```
-
-```{r}
-all_x        <- 0:10
-pvc_heights  <- sapply(all_x, function(k) sum(koa_1$kelp_on_ARKEV == k & koa_1$ARKEV_type == "PVC"))
-wood_heights <- sapply(all_x, function(k) sum(koa_1$kelp_on_ARKEV == k & koa_1$ARKEV_type == "WOOD"))
-
-stacked <- rbind(PVC = pvc_heights, WOOD = wood_heights)
-totals  <- colSums(stacked)
-
-max_y <- max(colSums(stacked))
-y_top <- ceiling(max_y / 2) * 2 + 2
-
-par(mar = c(4.5, 4.5, 3, 1), bg = "white")
-
-bp <- barplot(stacked,
-  names.arg  = all_x,
-  col        = c("#2E7D6E", "#C4622D"),
-  border     = "black",
-  space      = 0.15,
-  ylim       = c(0, 11),
-  xlab       = "Kelp count per ARKEV unit",
-  ylab       = "Number of ARKEV units",
-  main       = "Kelp on ARKEV — 5/25/26 Noyo",
-  cex.axis   = 0.9,
-  cex.names  = 0.9,
-  cex.lab    = 1,
-  las        = 1,
-  legend.text = rownames(stacked),
-  args.legend = list(x = "topleft", bty = "n", cex = 0.9,
-                     fill = c("#C4622D","#2E7D6E"), border = NA))
-text(x      = bp,
-     y      = totals + 0.3,
-     labels = ifelse(totals > 0, totals, ""),
-     cex    = 0.85,
-     font   = 2,
-     adj    = c(0.5, 0))
- 
-```
-
-#big river kelp on arkev
-```{r}
-koa_bigriver <- koa_master |>
-  mutate(
-    date = as.Date(paste(year, month, day, sep = "-"), format = "%Y-%m-%d")  # fix here
-  ) |>
-  distinct(date, ARKEV_unit, .keep_all = TRUE) |>
-  mutate(plot = str_extract(ARKEV_unit, "\\d+")) |>
-  mutate(plot = fct_relevel(ARKEV_type,
-                            "PVC",
-                            "WOOD"
-                            )) |>
-    group_by(date) |>
-  mutate(total = sum(kelp_on_ARKEV)) |>
-  group_by(date, ARKEV_type) |>
-  mutate(total_type = sum(kelp_on_ARKEV)) |>
-  group_by(date, ARKEV_type) |>
-  mutate(mean = mean(kelp_on_ARKEV),
-         se = sd(kelp_on_ARKEV)/sqrt(length(kelp_on_ARKEV))) |>
-  filter(site == "Big River")
-```
-
-```{r}
-koa_2 <- koa_bigriver %>%
-  filter(date == "2026-06-08") %>%
-  dplyr::select(date,site,ARKEV_type, ARKEV_unit,kelp_on_ARKEV)
-
-koa_3 <- koa_bigriver %>%
-  dplyr::select(date,site,ARKEV_type, ARKEV_unit,kelp_on_ARKEV)
-  
-```
-
-```{r}
-all_x2        <- 0:10
-pvc_heights2  <- sapply(all_x2, function(k) sum(koa_2$kelp_on_ARKEV == k & koa_2$ARKEV_type == "PVC"))
-wood_heights2 <- sapply(all_x2, function(k) sum(koa_2$kelp_on_ARKEV == k & koa_2$ARKEV_type == "WOOD"))
-stacked2 <- rbind(PVC = pvc_heights2, WOOD = wood_heights2)
-totals2  <- colSums(stacked2)
-
-max_y2 <- max(colSums(stacked2))
-y_top2 <- ceiling(max_y2 / 2) * 2 + 2
-
-par(mar = c(4.5, 4.5, 3, 1), bg = "white")
-
-par(mar = c(4.5, 4.5, 3, 1), bg = "white")
-bp2 <- barplot(stacked2,                          # ✅ fixed
-  names.arg  = all_x2,
-  col        = c("#2E7D6E", "#C4622D"),
-  border     = "black",
-  space      = 0.15,
-  ylim       = c(0, 11),
-  xlab       = "Kelp count per ARKEV unit",
-  ylab       = "Number of ARKEV units",
-  main       = "Kelp on ARKEV — 6/8/2026 Big River",
-  cex.axis   = 0.9,
-  cex.names  = 0.9,
-  cex.lab    = 1,
-  las        = 1,
-  legend.text = rownames(stacked2),
-  args.legend = list(x = "topleft", bty = "n", cex = 0.9,
-                     fill = c("#2E7D6E","#C4622D"),  # ✅ fixed
-                     border = NA))
-text(x      = bp2,
-     y      = totals2 + 0.3,
-     labels = ifelse(totals2 > 0, totals2, ""),
-     cex    = 0.85,
-     font   = 2,
-     adj    = c(0.5, 0))
-```
-
-#big river kelp on arkev survivorship
-```{r}
-survivorship <- koa_bigriver |>
-  filter(site == "Big River") |>
-  select(date, ARKEV_unit, ARKEV_type, kelp_on_ARKEV) |>
-  group_by(ARKEV_unit) |>
-  mutate(ARKEV_type = coalesce(ARKEV_type, first(na.omit(ARKEV_type)))) |>  # fill NA from same unit
-  ungroup() |>
-  pivot_wider(
-    names_from   = date,
-    values_from  = kelp_on_ARKEV,
-    names_prefix = "kelp_"
-  ) |>
-  rename(kelp_d1 = `kelp_2026-05-24`, kelp_d2 = `kelp_2026-06-08`) |>
-  mutate(survivorship_pct = (kelp_d2 / kelp_d1) * 100)
-
-survivorship_summary <- survivorship |>
-  group_by(ARKEV_type) |>
-  summarise(
-    n             = n(),
-    mean_surv_pct = mean(survivorship_pct, na.rm = TRUE),
-    se_surv_pct   = sd(survivorship_pct, na.rm = TRUE) / sqrt(n()),
-    .groups = "drop"
-  )
-
-overall <- survivorship |>
-  summarise(
-    ARKEV_type    = "OVERALL",
-    n             = n(),
-    mean_surv_pct = mean(survivorship_pct, na.rm = TRUE),
-    se_surv_pct   = sd(survivorship_pct, na.rm = TRUE) / sqrt(n())
-  )
-
-bind_rows(survivorship_summary, overall)
-```
