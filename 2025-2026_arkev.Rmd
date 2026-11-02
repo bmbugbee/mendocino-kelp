@@ -66,18 +66,61 @@ cover %>%
 ```
 
 ```{r}
-# Number of unique surveys in each dataset
-fish %>%
-  distinct(across(all_of(survey_key))) %>%
-  nrow()
+bind_rows(
+  ki %>%
+    transmute(
+      dataset = "Kelp, grazers, invertebrates",
+      date = as.Date(date),
+      site,
+      plot_type
+    ),
 
-ki %>%
-  distinct(across(all_of(survey_key))) %>%
-  nrow()
+  cover %>%
+    transmute(
+      dataset = "Biological cover",
+      date = as.Date(date),
+      site,
+      plot_type
+    )
+) %>%
+  mutate(year = lubridate::year(date)) %>%
+  group_by(dataset, year, site, plot_type) %>%
+  summarise(
+    n_surveys = n(),
+    first_date = min(date, na.rm = TRUE),
+    last_date = max(date, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(dataset, year, site, plot_type)
+```
 
-cover %>%
-  distinct(across(all_of(survey_key))) %>%
-  nrow()
+```{r}
+survey_key <- c("date", "site", "plot_type", "arkev_unit")
+
+ki_surveys <- ki %>%
+  distinct(across(all_of(survey_key)))
+
+cover_surveys <- cover %>%
+  distinct(across(all_of(survey_key)))
+
+tibble(
+  check = c(
+    "KI total rows",
+    "KI unique surveys",
+    "Cover total rows",
+    "Cover unique surveys",
+    "KI surveys missing from cover",
+    "Cover surveys missing from KI"
+  ),
+  n = c(
+    nrow(ki),
+    nrow(ki_surveys),
+    nrow(cover),
+    nrow(cover_surveys),
+    nrow(anti_join(ki_surveys, cover_surveys, by = survey_key)),
+    nrow(anti_join(cover_surveys, ki_surveys, by = survey_key))
+  )
+)
 ```
 
 ```{r}
@@ -125,35 +168,30 @@ ki = ki %>%
       sep = "_"
     ))
 
-fish %>% 
+fish <- fish %>%
   mutate(
     survey_id = paste(
-      date,
-      site,
-      plot_type,
-      arkev_unit,
+      date, site, plot_type, arkev_unit,
       sep = "_"
-    ))
-    
-cover %>%
+    )
+  )
+
+cover <- cover %>%
   mutate(
     survey_id = paste(
-      date,
-      site,
-      plot_type,
-      arkev_unit,
+      date, site, plot_type, arkev_unit,
       sep = "_"
-    ))
-    
-kelp %>%
-  mutate(
-    survey_id = paste(
-      date,
-      site,
-      plot_type,
-      arkev_unit,
-      sep = "_"
-    ))
+    )
+  )
+
+# Verify all three datasets
+sapply(
+  list(ki = ki, fish = fish, cover = cover),
+  function(x) c(
+    rows = nrow(x),
+    unique_ids = n_distinct(x$survey_id)
+  )
+)
 ```
 
 
@@ -178,22 +216,73 @@ survey_key_2025 <- c(
   "ARKEV_type",
   "ARKEV_unit"
 )
+
+# Check the structure of the 2025 data
+dim(surveys_2025)
+
+names(surveys_2025)
+
+surveys_2025 %>%
+  count(data_type, sort = TRUE)
+```
+
+```{r}
+surveys_2025 <- surveys_2025 %>%
+  rename(
+    arkev_unit = ARKEV_unit
+  ) %>%
+  mutate(
+    site = str_to_lower(str_trim(site)),
+    site = str_replace_all(site, " ", "_"),
+
+    plot_type = str_to_lower(str_trim(plot_type)),
+    arkev_unit = str_trim(as.character(arkev_unit)),
+
+    data_type = str_to_lower(str_trim(data_type)),
+    species_code = str_to_upper(str_trim(species_code))
+  )
+
+# Check the cleaned metadata
+surveys_2025 %>%
+  distinct(site, plot_type) %>%
+  arrange(site, plot_type)
 ```
 
 ```{r}
 surveys_2025 <- surveys_2025 %>%
   mutate(
+    year = 2025,
     date = as.Date(
       paste(year, month, day, sep = "-")
+    ),
+    survey_id = paste(
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      sep = "_"
     )
+  )
+
+surveys_2025 %>%
+  summarise(
+    n_records = n(),
+    n_surveys = n_distinct(survey_id),
+    n_dates = n_distinct(date),
+    first_date = min(date),
+    last_date = max(date),
+    n_missing_dates = sum(is.na(date))
   )
 ```
 
 ```{r}
 surveys_2025 %>%
-  count(data_type, sort = TRUE)
-surveys_2025 %>%
-  count(data_type, species_code, sort = TRUE)
+  count(
+    data_type,
+    species_code,
+    sort = TRUE
+  ) %>%
+  print(n = Inf)
 ```
 
 ```{r}
@@ -205,55 +294,71 @@ surveys_2025 <- surveys_2025 %>%
 
 surveys_2025 %>%
   summarise(
-    count_class = class(count_num),
-    n_missing = sum(is.na(count_num))
+    n_records = n(),
+    count_missing = sum(is.na(count_num)),
+    percent_missing = sum(is.na(percent_num)),
+    count_negative = sum(count_num < 0, na.rm = TRUE),
+    percent_negative = sum(percent_num < 0, na.rm = TRUE)
   )
 ```
 
-
 ```{r}
 surveys_2025 %>%
-  filter(data_type == "kelp") %>%
-  count(species_code, wt = count_num, sort = TRUE)
-
-surveys_2025 %>%
-  filter(data_type == "inverts") %>%
-  count(species_code, wt = count_num, sort = TRUE)
-
-surveys_2025 %>%
-  filter(data_type %in% c("urchins", "tegula")) %>%
-  count(data_type, species_code, sort = TRUE)
-```
-
-```{r}
-surveys_2025 <- surveys_2025 %>%
-  rename(arkev_unit = ARKEV_unit) %>%
-  mutate(year = 2025)
-
-surveys_2025 <- surveys_2025 %>%
-  mutate(
-    survey_id = paste(
-      date,
-      site,
-      plot_type,
-      arkev_unit,
-      sep = "_"
-    )
-  )
+  group_by(data_type) %>%
+  summarise(
+    n_records = n(),
+    missing_counts = sum(is.na(count_num)),
+    missing_percentages = sum(is.na(percent_num)),
+    .groups = "drop"
+  ) %>%
+  arrange(data_type)
 ```
 
 ```{r}
 surveys_2025 %>%
   filter(
-    data_type == "kelp",
-    species_code == "NO_KELP"
+    data_type != "algal_cover",
+    is.na(count_num)
   ) %>%
-  count(survey_id, sort = TRUE) %>%
-  summarise(
-    n_surveys_with_NO_KELP = n(),
-    total_NO_KELP_records = sum(n),
-    max_records_per_survey = max(n)
+  select(
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    data_type,
+    species_code,
+    count,
+    count_num,
+    notes
+  ) %>%
+  arrange(data_type, date) %>%
+  print(n = Inf)
+```
+
+```{r}
+kelp_surveys_2025 <- surveys_2025 %>%
+  filter(data_type == "kelp") %>%
+  group_by(survey_id) %>%
+  filter(!any(is.na(count_num))) %>%
+  ungroup() %>%
+  distinct(
+    survey_id,
+    year,
+    date,
+    site,
+    plot_type,
+    arkev_unit
   )
+
+# Check how many kelp surveys are retained
+tibble(
+  total_kelp_surveys = surveys_2025 %>%
+    filter(data_type == "kelp") %>%
+    summarise(n = n_distinct(survey_id)) %>%
+    pull(n),
+
+  complete_kelp_surveys = nrow(kelp_surveys_2025)
+)
 ```
 
 ```{r}
@@ -262,43 +367,55 @@ kelp_obs_2025 <- surveys_2025 %>%
     data_type == "kelp",
     species_code != "NO_KELP"
   ) %>%
+  semi_join(
+    kelp_surveys_2025,
+    by = "survey_id"
+  ) %>%
   group_by(
     survey_id,
     species_code
   ) %>%
   summarise(
-    abundance = sum(count_num, na.rm = TRUE),
+    abundance = sum(count_num),
     .groups = "drop"
   )
 
-kelp_2025_wide <- kelp_obs_2025 %>%
-  pivot_wider(
-    names_from = species_code,
-    values_from = abundance,
-    values_fill = 0
-  ) %>%
-  right_join(
-    kelp_surveys_2025,
-    by = "survey_id"
-  ) %>%
-  mutate(
-    across(
-      where(is.numeric),
-      ~ replace_na(.x, 0)
-    )
-  ) %>%
-  select(
-    survey_id,
-    year,
-    date,
-    site,
-    plot_type,
-    arkev_unit,
-    everything()
+# Check the resulting observations
+kelp_obs_2025 %>%
+  summarise(
+    n_surveys_with_kelp = n_distinct(survey_id),
+    n_species = n_distinct(species_code),
+    n_missing = sum(is.na(abundance))
   )
 ```
 
 ```{r}
+kelp_2025_wide <- kelp_surveys_2025 %>%
+  left_join(
+    kelp_obs_2025 %>%
+      pivot_wider(
+        names_from = species_code,
+        values_from = abundance,
+        values_fill = 0
+      ),
+    by = "survey_id"
+  ) %>%
+  mutate(
+    across(
+      -c(
+        survey_id, year, date, site,
+        plot_type, arkev_unit
+      ),
+      ~ replace_na(.x, 0)
+    )
+  ) %>%
+  select(
+    survey_id, year, date, site,
+    plot_type, arkev_unit,
+    everything()
+  )
+
+# Check the completed kelp dataset
 kelp_2025_wide %>%
   summarise(
     n_surveys = n(),
@@ -306,17 +423,60 @@ kelp_2025_wide %>%
       rowSums(
         select(
           .,
-          -survey_id,
-          -year,
-          -date,
-          -site,
-          -plot_type,
-          -arkev_unit
-        ),
-        na.rm = TRUE
+          -survey_id, -year, -date,
+          -site, -plot_type, -arkev_unit
+        )
       ) == 0
+    ),
+    n_missing = sum(
+      is.na(
+        select(
+          .,
+          -survey_id, -year, -date,
+          -site, -plot_type, -arkev_unit
+        )
+      )
     )
   )
+```
+
+```{r}
+# Correct the confirmed red urchin zero
+surveys_2025 <- surveys_2025 %>%
+  mutate(
+    count_num = if_else(
+      date == as.Date("2025-10-06") &
+        site == "big_river" &
+        plot_type == "arkev" &
+        arkev_unit == "1C" &
+        data_type == "urchins" &
+        species_code == "MESFRA",
+      0,
+      count_num
+    )
+  )
+
+# Rebuild the list of completed grazer surveys
+grazer_surveys_2025 <- surveys_2025 %>%
+  filter(data_type %in% c("urchins", "tegula")) %>%
+  group_by(survey_id) %>%
+  filter(!any(is.na(count_num))) %>%
+  ungroup() %>%
+  distinct(
+    survey_id, year, date, site,
+    plot_type, arkev_unit
+  )
+
+# Verify
+tibble(
+  complete_grazer_surveys = nrow(grazer_surveys_2025),
+  remaining_missing_grazer_records = surveys_2025 %>%
+    filter(
+      data_type %in% c("urchins", "tegula"),
+      is.na(count_num)
+    ) %>%
+    nrow()
+)
 ```
 
 
@@ -348,6 +508,10 @@ grazer_obs_2025 <- surveys_2025 %>%
   filter(
     data_type %in% c("urchins", "tegula")
   ) %>%
+  semi_join(
+    grazer_surveys_2025,
+    by = "survey_id"
+  ) %>%
   mutate(
     species = case_when(
       species_code == "STRPUR" & size_cm == "<2cm" ~ "purple_urchins_<2cm",
@@ -359,152 +523,160 @@ grazer_obs_2025 <- surveys_2025 %>%
     )
   ) %>%
   filter(!is.na(species)) %>%
-  group_by(
-    survey_id,
-    species
-  ) %>%
+  group_by(survey_id, species) %>%
   summarise(
-    abundance = sum(count_num, na.rm = TRUE),
+    abundance = sum(count_num),
     .groups = "drop"
   )
 
-grazer_surveys_2025 <- surveys_2025 %>%
-  filter(
-    data_type %in% c("urchins", "tegula")
-  ) %>%
-  distinct(
-    survey_id,
-    year,
-    date,
-    site,
-    plot_type,
-    arkev_unit
+# Check the resulting observations
+grazer_obs_2025 %>%
+  group_by(species) %>%
+  summarise(
+    n_surveys = n_distinct(survey_id),
+    n_missing = sum(is.na(abundance)),
+    .groups = "drop"
   )
 ```
 
 ```{r}
 grazer_2025_wide <- grazer_surveys_2025 %>%
   left_join(
-    grazer_obs_2025,
+    grazer_obs_2025 %>%
+      pivot_wider(
+        names_from = species,
+        values_from = abundance,
+        values_fill = 0
+      ),
     by = "survey_id"
   ) %>%
-  filter(!is.na(species)) %>%
-  pivot_wider(
-    names_from = species,
-    values_from = abundance,
-    values_fill = 0
-  ) %>%
-  right_join(
-    grazer_surveys_2025,
-    by = c(
-      "survey_id",
-      "year",
-      "date",
-      "site",
-      "plot_type",
-      "arkev_unit"
-    )
-  ) %>%
-  mutate(
-    across(
-      where(is.numeric),
-      ~ tidyr::replace_na(.x, 0)
-    )
-  )
-
-grazer_2025_wide %>%
-  summarise(
-    n_surveys = n(),
-    n_all_zero = sum(
-      rowSums(
-        select(
-          .,
-          -survey_id,
-          -year,
-          -date,
-          -site,
-          -plot_type,
-          -arkev_unit
-        )
-      ) == 0
-    )
-  )
-
-grazer_2025_wide %>%
-  summarise(
-    n_surveys = n(),
-    n_small = sum(`purple_urchins_<2cm` > 0),
-    n_large = sum(`purple_urchins_>2cm` > 0)
-  )
-
-grazer_2025_wide %>%
-  summarise(
-    n_surveys = n(),
-    small_urchins = sum(`purple_urchins_<2cm` >0),
-    large_urchins = sum(`purple_urchins_>2cm` >0),
-    red_urchins = sum(red_urchins  >0),
-    tegula = sum(tegula  >0)
-  )
-```
-
-```{r}
-invert_obs_2025 <- surveys_2025 %>%
-  filter(
-    data_type == "inverts",
-    species_code != "NO_INVERTS"
-  ) %>%
-  group_by(
-    survey_id,
-    species_code
-  ) %>%
-  summarise(
-    abundance = sum(count_num, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-invert_surveys_2025 <- surveys_2025 %>%
-  filter(data_type == "inverts") %>%
-  distinct(
+  select(
     survey_id,
     year,
     date,
     site,
     plot_type,
-    arkev_unit
+    arkev_unit,
+    all_of(grazers)
   )
+
+# Verify the completed dataset
+grazer_2025_wide %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_missing = sum(
+      is.na(across(all_of(grazers)))
+    ),
+    n_all_zero = sum(
+      rowSums(across(all_of(grazers))) == 0
+    )
+  )
+```
+
+```{r}
+surveys_2025 %>%
+  filter(
+    data_type == "inverts",
+    is.na(count_num)
+  ) %>%
+  select(
+    survey_id,
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    species_code,
+    count,
+    count_num,
+    notes
+  )
+```
+```{r}
+surveys_2025 <- surveys_2025 %>%
+  filter(
+    !(
+      survey_id == "2025-04-24_big_river_arkev_3E" &
+      data_type == "inverts" &
+      species_code == "DIOPATRA" &
+      is.na(count_num)
+    )
+  )
+
+# Verify that no missing invertebrate counts remain
+surveys_2025 %>%
+  filter(data_type == "inverts") %>%
+  summarise(
+    n_records = n(),
+    n_surveys = n_distinct(survey_id),
+    n_missing = sum(is.na(count_num))
+  )
+```
+
+
+```{r}
+# Identify 2025 invertebrate surveys
+invert_surveys_2025 <- surveys_2025 %>%
+  filter(data_type == "inverts") %>%
+  distinct(
+    survey_id, year, date, site,
+    plot_type, arkev_unit
+  )
+
+# Prepare observed invertebrate abundances
+invert_obs_2025 <- surveys_2025 %>%
+  filter(
+    data_type == "inverts",
+    species_code != "NO_INVERTS"
+  ) %>%
+  group_by(survey_id, species_code) %>%
+  summarise(
+    abundance = sum(count_num),
+    .groups = "drop"
+  )
+
+# Verify
+tibble(
+  total_invert_surveys = nrow(invert_surveys_2025),
+  surveys_with_inverts = n_distinct(invert_obs_2025$survey_id),
+  n_species = n_distinct(invert_obs_2025$species_code),
+  n_missing = sum(is.na(invert_obs_2025$abundance))
+)
 ```
 
 ```{r}
 invert_2025_wide <- invert_surveys_2025 %>%
   left_join(
-    invert_obs_2025,
+    invert_obs_2025 %>%
+      pivot_wider(
+        names_from = species_code,
+        values_from = abundance,
+        values_fill = 0
+      ),
     by = "survey_id"
   ) %>%
-  pivot_wider(
-    names_from = species_code,
-    values_from = abundance,
-    values_fill = 0
+  mutate(
+    across(
+      -c(survey_id, year, date, site, plot_type, arkev_unit),
+      ~ replace_na(.x, 0)
+    )
   )
+
+# Verify the dataset
+invert_species_cols <- setdiff(
+  names(invert_2025_wide),
+  c("survey_id", "year", "date", "site", "plot_type", "arkev_unit")
+)
 
 invert_2025_wide %>%
   summarise(
     n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_missing = sum(is.na(across(all_of(invert_species_cols)))),
     n_all_zero = sum(
-      rowSums(
-        select(
-          .,
-          -survey_id,
-          -year,
-          -date,
-          -site,
-          -plot_type,
-          -arkev_unit
-        ),
-        na.rm = TRUE
-      ) == 0
+      rowSums(across(all_of(invert_species_cols))) == 0
     )
   )
-
 ```
 
 
