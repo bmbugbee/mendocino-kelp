@@ -247,7 +247,7 @@ kelp_survival_noyo_summary
 
 ```{r}
 survival_tests_noyo <- kelp_survival_noyo %>%
-  filter(date > as.Date("2026-04-18")) %>%
+  filter(date > as.Date("2026-04-18", "2026-10-06", "2026-10-07")) %>%
   group_by(date) %>%
   summarise(
     p_value = fisher.test(
@@ -638,7 +638,7 @@ ggplot(stipe_data,aes(x = date, y = avg_length_type, color = site, linetype = AR
       "noyo" = "#0072B2"        
       )) +
   labs(
-    title = "Average Stipe Length by ARKEV Type",
+    title = "Average Stipe Length of 2026 ARKEV Kelp",
     x = "Month",
     y = "Average Stipe Length (cm)",
     color = "Site",

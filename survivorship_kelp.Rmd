@@ -365,12 +365,18 @@ ggplot(both_stipe, aes(x = date, y = avg_length, color = site, group = site)) +
     date_labels = "%b"              # short month names: Jan, Feb, Mar
   ) +
   labs(
-    title = "Growth of Spliced Sporophytes",
+    title = "Average Stipe Length of 2025 ARKEV Kelp",
     x = "Month",
     y = "Mean Stipe Length (cm)",
     color = "Site"
   ) +
-  theme_bw() +
+  
+   scale_color_manual(
+    values = c(
+      "Big River" = "#E69F00", 
+      "Noyo" = "#0072B2"        
+      )) +
+  theme_classic() +
   theme(
     axis.text.x = element_text(size = 15, face = "bold"),
     axis.text.y = element_text(size = 15, face = "bold"),

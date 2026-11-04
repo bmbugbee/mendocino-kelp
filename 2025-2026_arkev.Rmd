@@ -145,11 +145,11 @@ anti_join(ki_surveys, cover_surveys, by = survey_key)
 ```
 
 ```{r}
-grazers <- c( "purple_urchins_<2cm","purple_urchins_>2cm","red_urchins","tegula")
+grazers <- c( "HALRUF", "HALKAM", "purple_urchins_<2cm","purple_urchins_>2cm","red_urchins","tegula")
 
 kelp <- c("NERA", "NERJ", "LAMR", "LAMSET", "PTECAL", "DESSPP", "ALAMAR", "COSCOS", "LAMSTUMP", "DICSPP","DICTYOTALES")
 
-inverts <- c("HALRUF", "HALKAM", "PATMIN",  "DERIMB",  "PISOCH",  "PISBRE",  "PISGIG",  "CANCERSPP",  "PUGPRO",  "PYCHEL")
+inverts <- c("PATMIN",  "DERIMB",  "PISOCH",  "PISBRE",  "PISGIG",  "CANCERSPP",  "PUGPRO",  "PYCHEL")
 
 setdiff(
   c(grazers, kelp, inverts),
@@ -465,17 +465,22 @@ grazer_surveys_2025 <- surveys_2025 %>%
   distinct(
     survey_id, year, date, site,
     plot_type, arkev_unit
+  ) %>%
+  semi_join(
+    invert_surveys_2025,
+    by = "survey_id"
   )
 
 # Verify
 tibble(
   complete_grazer_surveys = nrow(grazer_surveys_2025),
-  remaining_missing_grazer_records = surveys_2025 %>%
-    filter(
-      data_type %in% c("urchins", "tegula"),
-      is.na(count_num)
-    ) %>%
-    nrow()
+  surveys_missing_invert_data = nrow(
+    anti_join(
+      grazer_surveys_2025,
+      invert_surveys_2025,
+      by = "survey_id"
+    )
+  )
 )
 ```
 
@@ -548,6 +553,12 @@ grazer_2025_wide <- grazer_surveys_2025 %>%
         values_from = abundance,
         values_fill = 0
       ),
+    by = "survey_id"
+  ) %>%
+  # Add abalone from the invertebrate survey records
+  left_join(
+    invert_2025_wide %>%
+      select(survey_id, HALRUF, HALKAM),
     by = "survey_id"
   ) %>%
   select(
@@ -680,95 +691,98 @@ invert_2025_wide %>%
 ```
 
 
-#grazers inverts and kelp
+##grazers inverts and kelp
 ##combine 2025-2026
-##match species code
 ```{r}
-#grazers
-sort(setdiff(
-  names(grazer_2025_wide),
-  grazers
-))
-
-sort(setdiff(
-  grazers,
-  names(grazer_2025_wide)
-))
-
+##match species code
 
 #inverts
-sort(setdiff(
-  names(invert_2025_wide),
-  inverts
+# Species present in 2025 but not in the 2026 species list
+setdiff(names(invert_2025_wide), c(
+  "survey_id", "year", "date", "site",
+  "plot_type", "arkev_unit", inverts
 ))
 
-sort(setdiff(
-  inverts,
-  names(invert_2025_wide)
-))
-
-
-#kelp
-sort(setdiff(
-  names(kelp_2025_wide),
-  kelp
-))
-
-sort(setdiff(
-  kelp,
-  names(kelp_2025_wide)
-))
-```
-```{r}
-invert_2025_wide %>%
-  summarise(
-    n_nonzero_NA = sum(`NA` != 0, na.rm = TRUE),
-    n_nonmissing_NA = sum(!is.na(`NA`))
-  )
+# Species expected in 2026 but absent from 2025
+setdiff(inverts, names(invert_2025_wide))
 ```
 
 ```{r}
 invert_2025_std <- invert_2025_wide %>%
-  select(-`NA`) %>%
   rename(
     CANCERSPP = CANSPP,
     PUGPRO = PUGSPP
-  ) %>%
-  mutate(
-    site = case_when(
-      site == "Big_River" ~ "Big River",
-      site == "big_river" ~ "Big River",
-      site == "Noyo" ~ "Noyo",
-      site == "noyo" ~ "Noyo",
-      TRUE ~ site
-    ),
-    survey_id = as.character(survey_id),
-    arkev_unit = as.character(arkev_unit)
   )
 
+# Verify the standardized columns
+setdiff(
+  inverts,
+  names(invert_2025_std)
+)
+```
+
+```{r}
 invert_2026_std <- ki %>%
   transmute(
-    survey_id = as.character(survey_id),
+    survey_id,
     year = 2026,
     date,
-    site = case_when(
-      site == "big_river" ~ "Big River",
-      site == "Big_River" ~ "Big River",
-      site == "noyo" ~ "Noyo",
-      site == "Noyo" ~ "Noyo",
-      TRUE ~ site
-    ),
+    site,
     plot_type,
     arkev_unit,
-    across(all_of(inverts))
-  )
-
-invert_2026_std <- invert_2026_std %>%
-  mutate(
     across(
       all_of(inverts),
       ~ as.numeric(unlist(.x))
     )
+  )
+
+# Check the standardized 2026 dataset
+invert_2026_std %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_missing = sum(is.na(across(all_of(inverts)))),
+    n_negative = sum(
+      as.matrix(across(all_of(inverts))) < 0,
+      na.rm = TRUE
+    )
+  )
+```
+
+```{r}
+invert_2026_std %>%
+  mutate(
+    n_missing = rowSums(
+      is.na(across(all_of(inverts)))
+    )
+  ) %>%
+  filter(n_missing > 0) %>%
+  select(
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    n_missing
+  ) %>%
+  arrange(date, site, plot_type, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+invert_2026_std <- invert_2026_std %>%
+  filter(
+    !if_all(
+      all_of(inverts),
+      is.na
+    )
+  )
+
+# Verify
+invert_2026_std %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_missing = sum(is.na(across(all_of(inverts))))
   )
 ```
 
@@ -786,60 +800,51 @@ sort(setdiff(
 
 ```{r}
 invert_2025_2026 <- bind_rows(
-  invert_2025_std,
-  invert_2026_std
-) %>%
-  mutate(
-    across(
-      -c(
-        survey_id,
-        year,
-        date,
-        site,
-        plot_type,
-        arkev_unit
-      ),
-      ~ tidyr::replace_na(.x, 0)
+  invert_2025_std %>%
+    select(
+      survey_id, year, date, site,
+      plot_type, arkev_unit,
+      all_of(inverts)
+    ),
+
+  invert_2026_std %>%
+    select(
+      survey_id, year, date, site,
+      plot_type, arkev_unit,
+      all_of(inverts)
     )
-  )
+)
 
-invert_2025_2026 %>%
-  count(year, site)
-
-invert_2025_2026 %>%
-  summarise(
-    n_surveys = n(),
-    n_2025 = sum(year == 2025),
-    n_2026 = sum(year == 2026),
-    n_sites = n_distinct(site)
+# Verify
+tibble(
+  n_surveys = nrow(invert_2025_2026),
+  n_invert_species = length(inverts),
+  n_missing = sum(
+    is.na(invert_2025_2026[inverts])
+  ),
+  abalone_in_inverts = any(
+    c("HALRUF", "HALKAM") %in%
+      names(invert_2025_2026)
   )
+)
 ```
 
 ```{r}
-# kelp
-sort(setdiff(
+#kelp
+# Species columns in 2025 not matching the standard kelp list
+setdiff(
   names(kelp_2025_wide),
-  kelp
-))
+  c(
+    "survey_id", "year", "date", "site",
+    "plot_type", "arkev_unit", kelp
+  )
+)
 
-sort(setdiff(
+# Standard kelp species missing from the 2025 dataset
+setdiff(
   kelp,
   names(kelp_2025_wide)
-))
-```
-
-```{r}
-surveys_2025 %>%
-  filter(
-    data_type == "kelp",
-    species_code %in% c("DICSPP", "DICTYOTALES")
-  ) %>%
-  summarise(
-    DICSPP_records = sum(species_code == "DICSPP"),
-    DICSPP_abundance = sum(count_num[species_code == "DICSPP"], na.rm = TRUE),
-    DICTYOTALES_records = sum(species_code == "DICTYOTALES"),
-    DICTYOTALES_abundance = sum(count_num[species_code == "DICTYOTALES"], na.rm = TRUE)
-  )
+)
 ```
 
 ```{r}
@@ -848,306 +853,5817 @@ kelp_2025_std <- kelp_2025_wide %>%
     ALAMAR = ALAR,
     PTECAL = PTER,
     LAMSTUMP = STUMP
-  ) %>%
-  mutate(
-    site = case_when(
-      site == "Big_River" ~ "Big River",
-      site == "big_river" ~ "Big River",
-      site == "Noyo" ~ "Noyo",
-      site == "noyo" ~ "Noyo",
-      TRUE ~ site
-    ),
-    survey_id = as.character(survey_id),
-    arkev_unit = as.character(arkev_unit)
   )
 
+# Verify the standardized species columns
+setdiff(
+  kelp,
+  names(kelp_2025_std)
+)
+```
+
+```{r}
 kelp_2026_std <- ki %>%
   transmute(
-    survey_id = as.character(survey_id),
-    year = 2026,
-    date,
-    site = case_when(
-      site == "big_river" ~ "Big River",
-      site == "Big_River" ~ "Big River",
-      site == "noyo" ~ "Noyo",
-      site == "Noyo" ~ "Noyo",
-      TRUE ~ site
-    ),
-    plot_type,
-    arkev_unit,
-     across(all_of(setdiff(kelp, c("DICSPP", "DICTYOTALES")))),
-    DICSPP = 0,
-    DICTYOTALES = 0
-  )
-
-sort(setdiff(
-  names(kelp_2025_std),
-  names(kelp_2026_std)
-))
-
-sort(setdiff(
-  names(kelp_2026_std),
-  names(kelp_2025_std)
-))
-
-kelp_2026_std <- kelp_2026_std %>%
-  mutate(
-    across(
-      all_of(c(kelp, "DICSPP", "DICTYOTALES")),
-      ~ as.numeric(unlist(.x))
-    )
-  )
-```
-
-```{r}
-kelp_2025_2026 <- bind_rows(
-  kelp_2025_std,
-  kelp_2026_std
-)
-
-kelp_2025_2026 %>%
-  count(year, site)
-
-kelp_2025_2026 %>%
-  summarise(
-    n_surveys = n(),
-    n_2025 = sum(year == 2025),
-    n_2026 = sum(year == 2026),
-    n_sites = n_distinct(site)
-  )
-```
-
-
-
-```{r}
-grazer_2025_std <- grazer_2025_wide %>%
-  select(
     survey_id,
-    year,
+    year = 2026,
     date,
     site,
     plot_type,
     arkev_unit,
-    all_of(grazers)
-  ) %>%
-  mutate(
-    survey_id = as.character(survey_id),
-    arkev_unit = as.character(arkev_unit),
-    site = case_when(
-      site == "Big_River" ~ "Big River",
-      site == "big_river" ~ "Big River",
-      site == "Noyo" ~ "Noyo",
-      site == "noyo" ~ "Noyo",
-      TRUE ~ site
+    across(
+      all_of(intersect(kelp, names(ki))),
+      ~ as.numeric(unlist(.x))
     )
   )
 
+# Verify the 2026 kelp dataset
+kelp_2026_std %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_missing = sum(
+      is.na(across(all_of(intersect(kelp, names(ki)))))
+    ),
+    n_negative = sum(
+      as.matrix(across(all_of(intersect(kelp, names(ki))))) < 0,
+      na.rm = TRUE
+    )
+  )
+```
+
+```{r}
+kelp_2026_std %>%
+  mutate(
+    n_missing = rowSums(
+      is.na(across(all_of(intersect(kelp, names(ki)))))
+    )
+  ) %>%
+  filter(n_missing > 0) %>%
+  select(
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    n_missing
+  ) %>%
+  arrange(date, site, plot_type, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+kelp_vars_2026 <- intersect(kelp, names(kelp_2026_std))
+
+kelp_2026_std <- kelp_2026_std %>%
+  filter(
+    if_all(
+      all_of(kelp_vars_2026),
+      ~ !is.na(.x)
+    )
+  )
+
+# Verify
+kelp_2026_std %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_missing = sum(is.na(across(all_of(kelp_vars_2026))))
+  )
+```
+
+```{r}
+# Identify the shared kelp variables
+shared_kelp <- intersect(
+  kelp,
+  names(kelp_2026_std)
+)
+
+# Combine the two years
+kelp_2025_2026 <- bind_rows(
+  kelp_2025_std %>%
+    select(
+      survey_id, year, date, site,
+      plot_type, arkev_unit,
+      all_of(shared_kelp)
+    ),
+
+  kelp_2026_std %>%
+    select(
+      survey_id, year, date, site,
+      plot_type, arkev_unit,
+      all_of(shared_kelp)
+    )
+)
+
+# Verify the combined dataset
+kelp_2025_2026 %>%
+  group_by(year, site, plot_type) %>%
+  summarise(
+    n_surveys = n(),
+    n_missing = sum(is.na(across(all_of(shared_kelp)))),
+    .groups = "drop"
+  ) %>%
+  arrange(year, site, plot_type)
+```
+
+```{r}
+#grazers
 grazer_2026_std <- ki %>%
   transmute(
-    survey_id = as.character(survey_id),
+    survey_id,
     year = 2026,
     date,
-    site = case_when(
-      site == "big_river" ~ "Big River",
-      site == "Big_River" ~ "Big River",
-      site == "noyo" ~ "Noyo",
-      site == "Noyo" ~ "Noyo",
-      TRUE ~ site
-    ),
+    site,
     plot_type,
-    arkev_unit = as.character(arkev_unit),
-    across(all_of(grazers))
-  ) %>%
-  mutate(
+    arkev_unit,
     across(
       all_of(grazers),
       ~ as.numeric(unlist(.x))
     )
   )
 
-
-sort(setdiff(
-  names(grazer_2025_std),
-  names(grazer_2026_std)
-))
-
-sort(setdiff(
-  names(grazer_2026_std),
-  names(grazer_2025_std)
-))
-
-grazer_2026_std <- grazer_2026_std %>%
-  mutate(
-    across(
-      all_of(grazers),
-      ~ as.numeric(unlist(.x))
+# Check the 2026 grazer data
+grazer_2026_std %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_grazer_species = length(grazers),
+    n_missing = sum(is.na(across(all_of(grazers)))),
+    n_negative = sum(
+      as.matrix(across(all_of(grazers))) < 0,
+      na.rm = TRUE
     )
+  )
+```
+
+```{r}
+grazer_2026_std %>%
+  mutate(
+    n_missing = rowSums(
+      is.na(across(all_of(grazers)))
+    )
+  ) %>%
+  filter(n_missing > 0) %>%
+  select(
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    n_missing
+  ) %>%
+  arrange(date, site, plot_type, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+grazer_2026_std <- grazer_2026_std %>%
+  filter(
+    if_all(
+      all_of(grazers),
+      ~ !is.na(.x)
+    )
+  )
+
+# Verify
+grazer_2026_std %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_grazer_species = length(grazers),
+    n_missing = sum(is.na(across(all_of(grazers))))
   )
 ```
 
 ```{r}
 grazer_2025_2026 <- bind_rows(
-  grazer_2025_std,
-  grazer_2026_std
+  grazer_2025_wide %>%
+    select(
+      survey_id, year, date, site,
+      plot_type, arkev_unit,
+      all_of(grazers)
+    ),
+
+  grazer_2026_std %>%
+    select(
+      survey_id, year, date, site,
+      plot_type, arkev_unit,
+      all_of(grazers)
+    )
 )
 
+# Verify the combined dataset
 grazer_2025_2026 %>%
-  count(year, site)
-
-grazer_2025_2026 %>%
+  group_by(year, site, plot_type) %>%
   summarise(
     n_surveys = n(),
-    n_2025 = sum(year == 2025),
-    n_2026 = sum(year == 2026),
-    n_sites = n_distinct(site)
-  )
-```
-
-```{r}
-grazer_2025_2026 %>%
-  count(survey_id) %>%
-  summarise(
-    n_surveys = n(),
-    duplicate_surveys = sum(n > 1)
-  )
-
-invert_2025_2026 %>%
-  count(survey_id) %>%
-  summarise(
-    n_surveys = n(),
-    duplicate_surveys = sum(n > 1)
-  )
-
-kelp_2025_2026 %>%
-  count(survey_id) %>%
-  summarise(
-    n_surveys = n(),
-    duplicate_surveys = sum(n > 1)
-  )
-```
-
-##join
-```{r}
-ki_2025_2026 <- grazer_2025_2026 %>%
-  full_join(
-    kelp_2025_2026 %>%
-      select(
-        survey_id,
-        all_of(kelp)
-      ),
-    by = "survey_id"
+    n_missing = sum(is.na(across(all_of(grazers)))),
+    .groups = "drop"
   ) %>%
-  full_join(
-    invert_2025_2026 %>%
-      select(
-        survey_id,
-        all_of(inverts)
-      ),
-    by = "survey_id"
-  )
+  arrange(year, site, plot_type)
+```
 
-ki_2025_2026 %>%
+```{r}
+bind_rows(
+  grazer_2025_2026 %>%
+    transmute(community = "grazers", survey_id),
+
+  kelp_2025_2026 %>%
+    transmute(community = "kelp", survey_id),
+
+  invert_2025_2026 %>%
+    transmute(community = "inverts", survey_id)
+) %>%
+  group_by(community) %>%
   summarise(
     n_surveys = n(),
     n_unique_surveys = n_distinct(survey_id),
-    n_2025 = sum(year == 2025),
-    n_2026 = sum(year == 2026)
+    n_duplicates = n() - n_distinct(survey_id),
+    .groups = "drop"
   )
-
-names(ki_2025_2026)
 ```
 
-##qaqc
 ```{r}
-ki_2025_2026 <- ki_2025_2026 %>%
+# Identify surveys present in all three community datasets
+shared_survey_ids <- Reduce(
+  intersect,
+  list(
+    grazer_2025_2026$survey_id,
+    kelp_2025_2026$survey_id,
+    invert_2025_2026$survey_id
+  )
+)
+
+# Check how many surveys are shared
+tibble(
+  community = c("grazers", "kelp", "inverts"),
+  n_surveys = c(
+    nrow(grazer_2025_2026),
+    nrow(kelp_2025_2026),
+    nrow(invert_2025_2026)
+  ),
+  n_shared = length(shared_survey_ids)
+) %>%
+  mutate(
+    n_excluded = n_surveys - n_shared
+  )
+```
+
+```{R}
+# Inspect 2026 cover variables
+names(cover)
+
+# Inspect 2025 substrate/cover categories
+surveys_2025 %>%
+  filter(
+    str_detect(
+      str_to_lower(data_type),
+      "cover|substrate"
+    )
+  ) %>%
+  count(data_type, species_code, sort = TRUE) %>%
+  print(n = Inf)
+```
+
+
+##join
+```{r}
+community_2025_2026 <- grazer_2025_2026 %>%
+  filter(survey_id %in% shared_survey_ids) %>%
+
+  # Add the 9 shared kelp species
+  left_join(
+    kelp_2025_2026 %>%
+      select(survey_id, all_of(shared_kelp)),
+    by = "survey_id"
+  ) %>%
+
+  # Add the 8 invertebrate species
+  left_join(
+    invert_2025_2026 %>%
+      select(survey_id, all_of(inverts)),
+    by = "survey_id"
+  )
+
+# Verify the complete biological community dataset
+community_2025_2026 %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_grazer_species = length(grazers),
+    n_kelp_species = length(shared_kelp),
+    n_invert_species = length(inverts),
+    n_total_species = length(c(grazers, shared_kelp, inverts)),
+    n_missing = sum(
+      is.na(across(all_of(c(grazers, shared_kelp, inverts))))
+    )
+  )
+```
+
+```{r}
+noyo_location_crosswalk <- tibble(
+  unit_2025 = c(
+    "1A", "1B", "1C", "1D", "1E",
+    "2A", "2B", "2C", "2D", "2E",
+    "3A", "3B", "3C", "3D", "3E",
+    "4A", "4B", "4C", "4D", "4E"
+  ),
+
+  plot_type_2026 = c(
+    "control", "arkev", "arkev", "arkev", "arkev",
+    "arkev", "arkev", "arkev", "control", "control",
+    "control", "arkev", "arkev", "arkev", "arkev",
+    "arkev", "arkev", "arkev", "control", "control"
+  ),
+
+  unit_2026 = c(
+    "7A", "7A", "7B", "7C", "7D",
+    "8C", "8B", "8A", "8A", "8B",
+    "9A", "9A", "9B", "9C", "9D",
+    "10C", "10B", "10A", "10A", "10B"
+  )
+)
+
+# Verify mapping
+noyo_location_crosswalk %>%
+  summarise(
+    n_mappings = n(),
+    n_unique_2025 = n_distinct(unit_2025),
+    n_unique_2026 = n_distinct(
+      plot_type_2026, unit_2026
+    ),
+    n_2026_arkev = sum(plot_type_2026 == "arkev"),
+    n_2026_control = sum(plot_type_2026 == "control")
+  )
+```
+
+```{r}
+community_locations_2025_2026 <- community_2025_2026 %>%
+  mutate(
+    # Standardize unit identifiers for location matching
+    unit_clean = stringr::str_remove(
+      arkev_unit, "^[Cc]"
+    ),
+
+    plot_number = as.integer(
+      stringr::str_extract(unit_clean, "[0-9]+")
+    )
+  ) %>%
+
+  # Match 2025 Noyo locations to their 2026 counterparts
+  left_join(
+    noyo_location_crosswalk %>%
+      transmute(
+        unit_2025,
+        noyo_location_id = paste(
+          "noyo", plot_type_2026, unit_2026,
+          sep = "_"
+        )
+      ),
+    by = c("unit_clean" = "unit_2025")
+  ) %>%
+
+  mutate(
+    physical_location_id = case_when(
+
+      # 2025 Noyo: use the crosswalk
+      site == "noyo" & year == 2025 ~
+        noyo_location_id,
+
+      # 2026 Noyo: use the actual 2026 location
+      site == "noyo" & year == 2026 ~
+        paste(site, plot_type, unit_clean, sep = "_"),
+
+      # Big River plots 8-10 moved between years
+      site == "big_river" &
+        plot_number %in% 8:10 ~
+        paste(site, plot_type, unit_clean, year, sep = "_"),
+
+      # Other Big River locations
+      site == "big_river" ~
+        paste(site, plot_type, unit_clean, sep = "_"),
+
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(-unit_clean, -noyo_location_id)
+
+# Verify
+community_locations_2025_2026 %>%
+  group_by(year, site, plot_type) %>%
+  summarise(
+    n_surveys = n(),
+    n_physical_locations = n_distinct(
+      physical_location_id, na.rm = TRUE
+    ),
+    n_unmapped = sum(is.na(physical_location_id)),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Check whether 2025 Noyo locations appear in 2026
+community_locations_2025_2026 %>%
+  filter(site == "noyo") %>%
+  group_by(physical_location_id) %>%
+  summarise(
+    surveyed_2025 = any(year == 2025),
+    surveyed_2026 = any(year == 2026),
+    .groups = "drop"
+  ) %>%
+  filter(surveyed_2025) %>%
+  arrange(physical_location_id) %>%
+  print(n = Inf)
+```
+
+```{r}
+community_locations_2025_2026 %>%
+  filter(site == "big_river") %>%
+  distinct(
+    year,
+    physical_location_id,
+    plot_number
+  ) %>%
+  group_by(
+    physical_location_id,
+    plot_number
+  ) %>%
+  summarise(
+    n_years = n_distinct(year),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    relocated = plot_number %in% 8:10
+  ) %>%
+  count(
+    relocated,
+    n_years,
+    name = "n_physical_locations"
+  )
+```
+
+
+```{r}
+#cover
+surveys_2025 %>%
+  filter(
+    data_type == "algal_cover",
+    species_code %in% c("BS", "SAND", "BARESAND")
+  ) %>%
+  group_by(month, species_code) %>%
+  summarise(
+    n_records = n(),
+    n_surveys = n_distinct(survey_id),
+    n_missing = sum(is.na(percent_num)),
+    min_percent = if (all(is.na(percent_num))) NA_real_
+                  else min(percent_num, na.rm = TRUE),
+    max_percent = if (all(is.na(percent_num))) NA_real_
+                  else max(percent_num, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(month, species_code) %>%
+  print(n = Inf)
+```
+
+```{r}
+surveys_2025 %>%
+  filter(
+    data_type == "algal_cover",
+    species_code %in% c("BS", "SAND", "BARESAND")
+  ) %>%
+  group_by(
+    survey_id, date, site, plot_type, arkev_unit
+  ) %>%
+  summarise(
+    sand_codes = paste(
+      sort(unique(species_code)),
+      collapse = ", "
+    ),
+    n_sand_codes = n_distinct(species_code),
+    sand_percent_total = sum(percent_num),
+    substrate_recorded = paste(
+      sort(unique(na.omit(as.character(substrate)))),
+      collapse = ", "
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_sand_codes), date) %>%
+  print(n = Inf)
+```
+
+
+```{r}
+cover_2025 <- surveys_2025 %>%
+  filter(
+    data_type == "algal_cover",
+    month != 4
+  ) %>%
+  mutate(
+    taxon = case_when(
+      species_code == "CRUCOR" ~ "CCA",
+      species_code == "ARTCOR" ~ "ACA",
+      species_code == "ENCRED" ~ "ER",
+      species_code %in% c("BR", "BAREROCK") ~ "BR",
+      species_code == "TURF" ~ "turf",
+      species_code == "FLESHY" ~ "FLESHY",
+      species_code == "SCUM" ~ "SCUM",
+
+      # Standardize the three sand codes
+      species_code %in% c("BS", "SAND", "BARESAND") ~ "SAND",
+
+      TRUE ~ NA_character_
+    ),
+    cover = percent_num
+  ) %>%
+  filter(!is.na(taxon)) %>%
+  group_by(
+    survey_id, year, date, site,
+    plot_type, arkev_unit, taxon
+  ) %>%
+  summarise(
+    cover_raw = if (all(is.na(cover))) {
+      NA_real_
+    } else {
+      sum(cover, na.rm = TRUE)
+    },
+    .groups = "drop"
+  )
+
+# Verify standardized sand observations
+cover_2025 %>%
+  filter(taxon == "SAND") %>%
+  summarise(
+    n_records = n(),
+    n_surveys = n_distinct(survey_id),
+    n_missing = sum(is.na(cover_raw)),
+    min_sand = min(cover_raw, na.rm = TRUE),
+    max_sand = max(cover_raw, na.rm = TRUE)
+  )
+```
+
+```{r}
+# Check cover-data availability for 2025 biological surveys
+
+cover_availability_2025 <- surveys_2025 %>%
+  filter(data_type == "algal_cover") %>%
+  group_by(survey_id) %>%
+  summarise(
+    n_cover_records = n(),
+    n_valid_percent = sum(!is.na(percent_num)),
+    has_sand_record = any(
+      species_code %in% c("BS", "SAND", "BARESAND")
+    ),
+    .groups = "drop"
+  )
+
+community_locations_2025_2026 %>%
+  filter(year == 2025) %>%
+  left_join(
+    cover_availability_2025,
+    by = "survey_id"
+  ) %>%
+  group_by(site, plot_type) %>%
+  summarise(
+    n_surveys = n(),
+    n_no_cover_records = sum(is.na(n_cover_records)),
+    n_no_valid_percent = sum(
+      !is.na(n_cover_records) & n_valid_percent == 0
+    ),
+    n_with_sand_record = sum(
+      has_sand_record %in% TRUE
+    ),
+    n_without_sand_record = sum(
+      has_sand_record %in% FALSE
+    ),
+    .groups = "drop"
+  )
+```
+
+```{r}
+substrate_check_2025 <- surveys_2025 %>%
+  group_by(survey_id) %>%
+  summarise(
+    categorical_sand = any(
+      str_detect(
+        str_to_upper(coalesce(as.character(substrate), "")),
+        "SAND"
+      )
+    ),
+    .groups = "drop"
+  )
+
+community_locations_2025_2026 %>%
+  filter(year == 2025) %>%
+  left_join(
+    cover_availability_2025,
+    by = "survey_id"
+  ) %>%
+  left_join(
+    substrate_check_2025,
+    by = "survey_id"
+  ) %>%
+  mutate(
+    month = as.integer(format(date, "%m"))
+  ) %>%
+  group_by(month, site) %>%
+  summarise(
+    n_without_sand_record = sum(has_sand_record == FALSE),
+    n_categorical_sand_without_percent = sum(
+      has_sand_record == FALSE & categorical_sand
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(month, site)
+```
+
+```{r}
+community_locations_2025_2026 %>%
+  filter(year == 2025) %>%
+  left_join(
+    cover_availability_2025,
+    by = "survey_id"
+  ) %>%
+  left_join(
+    substrate_check_2025,
+    by = "survey_id"
+  ) %>%
+  filter(
+    has_sand_record == FALSE,
+    categorical_sand == TRUE
+  ) %>%
+  left_join(
+    surveys_2025 %>%
+      group_by(survey_id) %>%
+      summarise(
+        substrate_description = paste(
+          sort(unique(na.omit(as.character(substrate)))),
+          collapse = ", "
+        ),
+        .groups = "drop"
+      ),
+    by = "survey_id"
+  ) %>%
   select(
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    substrate_description,
+    total_community
+  ) %>%
+  arrange(date, site, plot_type, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Compare sand cover with all-zero biological surveys in 2025
+
+community_locations_2025_2026 %>%
+  filter(
+    year == 2025,
+    total_community == 0
+  ) %>%
+  left_join(
+    cover_2025 %>%
+      filter(taxon == "SAND") %>%
+      select(
+        survey_id,
+        sand_percent = cover_raw
+      ),
+    by = "survey_id"
+  ) %>%
+  left_join(
+    surveys_2025 %>%
+      group_by(survey_id) %>%
+      summarise(
+        substrate_description = paste(
+          sort(unique(na.omit(as.character(substrate)))),
+          collapse = ", "
+        ),
+        .groups = "drop"
+      ),
+    by = "survey_id"
+  ) %>%
+  select(
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    sand_percent,
+    substrate_description,
+    total_community
+  ) %>%
+  arrange(date, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+community_locations_2025_2026 %>%
+  filter(
+    year == 2026,
+    total_community == 0
+  ) %>%
+  left_join(
+    cover %>%
+      transmute(
+        survey_id,
+        sand_percent = as.numeric(unlist(SAND))
+      ),
+    by = "survey_id"
+  ) %>%
+  select(
+    date,
+    site,
+    plot_type,
+    arkev_unit,
+    physical_location_id,
+    sand_percent,
+    total_community
+  ) %>%
+  arrange(date, site, plot_type, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+hard_cover_taxa <- c(
+  "CCA", "ACA", "ER", "BR", "turf"
+)
+
+cover_balance_2025 <- cover_2025 %>%
+  group_by(
+    survey_id, year, date, site,
+    plot_type, arkev_unit
+  ) %>%
+  summarise(
+    hard_cover = sum(
+      cover_raw[taxon %in% hard_cover_taxa],
+      na.rm = TRUE
+    ),
+
+    sand_recorded = any(taxon == "SAND"),
+
+    sand_percent = if (any(taxon == "SAND")) {
+      cover_raw[taxon == "SAND"][1]
+    } else {
+      NA_real_
+    },
+
+    n_missing_cover = sum(is.na(cover_raw)),
+
+    .groups = "drop"
+  ) %>%
+
+  # Add categorical substrate descriptions
+  left_join(
+    surveys_2025 %>%
+      group_by(survey_id) %>%
+      summarise(
+        substrate_description = paste(
+          sort(unique(
+            na.omit(as.character(substrate))
+          )),
+          collapse = ", "
+        ),
+        .groups = "drop"
+      ),
+    by = "survey_id"
+  ) %>%
+
+  mutate(
+    categorical_sand = str_detect(
+      str_to_upper(substrate_description),
+      "SAND"
+    ),
+
+    total_accounted = hard_cover + coalesce(sand_percent, 0),
+
+    remaining_cover = 100 - total_accounted
+  )
+
+# Examine surveys with partial recorded sand
+# or categorical sand without a percentage
+
+cover_balance_2025 %>%
+  filter(
+    (sand_recorded & sand_percent < 100) |
+      (!sand_recorded & categorical_sand)
+  ) %>%
+  select(
+    date, site, plot_type, arkev_unit,
+    substrate_description,
+    hard_cover,
+    sand_percent,
+    total_accounted,
+    remaining_cover,
+    n_missing_cover
+  ) %>%
+  arrange(date, site, plot_type, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+cover_balance_2025 %>%
+  filter(
+    sand_recorded,
+    !is.na(sand_percent)
+  ) %>%
+  group_by(site) %>%
+  summarise(
+    n_surveys = n(),
+
+    n_equal_100 = sum(
+      abs(total_accounted - 100) < 0.001
+    ),
+
+    n_below_100 = sum(
+      total_accounted < 99.999
+    ),
+
+    n_above_100 = sum(
+      total_accounted > 100.001
+    ),
+
+    mean_total = mean(total_accounted),
+
+    median_total = median(total_accounted),
+
+    .groups = "drop"
+  )
+```
+
+```{r}
+cover_balance_2025 %>%
+  filter(
+    !sand_recorded,
+    categorical_sand
+  ) %>%
+  left_join(
+    cover_2025 %>%
+      filter(taxon %in% c("FLESHY", "SCUM")) %>%
+      select(survey_id, taxon, cover_raw) %>%
+      pivot_wider(
+        names_from = taxon,
+        values_from = cover_raw
+      ),
+    by = "survey_id"
+  ) %>%
+  select(
+    date, site, plot_type, arkev_unit,
+    substrate_description,
+    hard_cover,
+    FLESHY,
+    SCUM,
+    remaining_cover
+  ) %>%
+  arrange(date, site, plot_type, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+cover_2025 %>%
+  semi_join(
+    cover_balance_2025 %>%
+      filter(
+        !sand_recorded,
+        categorical_sand
+      ),
+    by = "survey_id"
+  ) %>%
+  select(
+    date, site, plot_type,
+    arkev_unit, taxon, cover_raw
+  ) %>%
+  pivot_wider(
+    names_from = taxon,
+    values_from = cover_raw
+  ) %>%
+  arrange(
+    date, site, plot_type, arkev_unit
+  ) %>%
+  print(n = Inf)
+```
+
+```{r}
+sand_inference_2025 <- cover_balance_2025 %>%
+  filter(
+    !sand_recorded,
+    categorical_sand
+  ) %>%
+  left_join(
+    cover_2025 %>%
+      filter(taxon %in% c("FLESHY", "SCUM")) %>%
+      select(survey_id, taxon, cover_raw) %>%
+      pivot_wider(
+        names_from = taxon,
+        values_from = cover_raw
+      ),
+    by = "survey_id"
+  ) %>%
+  mutate(
+    # Potential sand area based on underlying cover only
+    sand_upper_bound = if_else(
+      hard_cover >= 0 & hard_cover <= 100,
+      100 - hard_cover,
+      NA_real_
+    ),
+
+    # Identify whether other cover layers are present
+    fleshy_present = !is.na(FLESHY) & FLESHY > 0,
+    scum_present = !is.na(SCUM) & SCUM > 0,
+
+    # Candidate sand estimates, not final values
+    sand_candidate = case_when(
+      hard_cover == 100 ~ 0,
+      TRUE ~ NA_real_
+    ),
+
+    inference_status = case_when(
+      hard_cover == 100 ~ "Candidate 0% sand",
+      fleshy_present | scum_present ~
+        "Needs review: overlapping cover",
+      TRUE ~ "Unknown sand percentage"
+    )
+  )
+
+sand_inference_2025 %>%
+  select(
+    date, site, arkev_unit,
+    substrate_description,
+    hard_cover, FLESHY, SCUM,
+    sand_upper_bound,
+    sand_candidate,
+    inference_status
+  ) %>%
+  arrange(date, site, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+sand_status_2025 <- cover_balance_2025 %>%
+  mutate(
+    sand_status = case_when(
+      sand_recorded & !is.na(sand_percent) ~
+        "Measured sand percentage",
+
+      sand_recorded & is.na(sand_percent) ~
+        "Sand record with missing percentage",
+
+      !sand_recorded & categorical_sand ~
+        "Sand indicated, percentage unknown",
+
+      !sand_recorded & !categorical_sand ~
+        "No sand record or categorical indication"
+    )
+  )
+
+# Summarize the different cases
+sand_status_2025 %>%
+  group_by(site, sand_status) %>%
+  summarise(
+    n_surveys = n(),
+    n_hard_cover_100 = sum(
+      abs(hard_cover - 100) < 0.001,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(site, sand_status)
+```
+
+```{r}
+sand_status_2025 %>%
+  filter(
+    sand_status ==
+      "No sand record or categorical indication"
+  ) %>%
+  group_by(site) %>%
+  summarise(
+    n_surveys = n(),
+
+    n_zero_hard_cover = sum(
+      hard_cover == 0, na.rm = TRUE
+    ),
+
+    n_partial_hard_cover = sum(
+      hard_cover > 0 & hard_cover < 100,
+      na.rm = TRUE
+    ),
+
+    n_full_hard_cover = sum(
+      abs(hard_cover - 100) < 0.001,
+      na.rm = TRUE
+    ),
+
+    n_over_100 = sum(
+      hard_cover > 100.001,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  )
+```
+
+```{r}
+sand_2025_values <- sand_status_2025 %>%
+  mutate(
+    # Sand percentages recorded during surveys
+    SAND_measured = if_else(
+      sand_recorded,
+      sand_percent,
+      NA_real_
+    ),
+
+    # Infer 0% sand when underlying cover equals 100%
+    # and no sand was recorded or indicated
+    SAND_inferred = case_when(
+      !sand_recorded &
+        !categorical_sand &
+        abs(hard_cover - 100) < 0.001 ~ 0,
+
+      TRUE ~ NA_real_
+    ),
+
+    # Field-confirmed 0% sand for the nine surveys
+    # where underlying cover exceeded 100%
+    SAND_field_confirmed = case_when(
+      !sand_recorded &
+        !categorical_sand &
+        hard_cover > 100 ~ 0,
+
+      TRUE ~ NA_real_
+    ),
+
+    # Combine sand values while preserving missing data
+    SAND = coalesce(
+      SAND_measured,
+      SAND_inferred,
+      SAND_field_confirmed
+    ),
+
+    # Track how each sand percentage was obtained
+    sand_source = case_when(
+      !is.na(SAND_measured) ~ "Measured",
+      !is.na(SAND_field_confirmed) ~ "Field-confirmed 0%",
+      !is.na(SAND_inferred) ~ "Inferred 0%",
+      categorical_sand ~ "Categorical sand, percentage unknown",
+      TRUE ~ "Sand percentage unknown"
+    )
+  )
+
+# Verify
+sand_2025_values %>%
+  group_by(site, sand_source) %>%
+  summarise(
+    n_surveys = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(site, sand_source)
+```
+
+```{r}
+cover_2025_adj <- cover_2025 %>%
+
+  # Bring in measured/inferred sand percentages
+  left_join(
+    sand_2025_values %>%
+      select(
+        survey_id,
+        SAND,
+        sand_source
+      ),
+    by = "survey_id"
+  ) %>%
+
+  group_by(
+    survey_id, year, date, site,
+    plot_type, arkev_unit
+  ) %>%
+
+  mutate(
+    # Underlying hard-substrate cover
+    underlying_cover = sum(
+      cover_raw[
+        taxon %in% c("CCA", "ACA", "ER", "BR", "turf")
+      ],
+      na.rm = TRUE
+    ),
+
+    # Available hard substrate
+    hard_substrate = 100 - SAND,
+
+    # Preserve original proportional adjustment
+    scale_factor = case_when(
+      !is.na(hard_substrate) &
+        underlying_cover > hard_substrate &
+        underlying_cover > 0 ~
+          hard_substrate / underlying_cover,
+
+      TRUE ~ 1
+    ),
+
+    # Scale biological cover, not sand
+    cover_clean = if_else(
+      taxon == "SAND",
+      cover_raw,
+      cover_raw * scale_factor
+    )
+  ) %>%
+  ungroup()
+
+# Verify adjustments and missing sand
+cover_2025_adj %>%
+  distinct(
     survey_id,
+    SAND,
+    sand_source,
+    underlying_cover,
+    hard_substrate,
+    scale_factor
+  ) %>%
+  summarise(
+    n_surveys = n(),
+    n_sand_available = sum(!is.na(SAND)),
+    n_sand_unknown = sum(is.na(SAND)),
+    n_adjusted = sum(scale_factor < 1),
+    n_unadjusted = sum(scale_factor == 1)
+  )
+```
+
+```{r}
+# Correct underlying cover >100% when sand is unknown
+cover_2025_adj <- cover_2025_adj %>%
+  mutate(
+    scale_factor = case_when(
+      is.na(SAND) &
+        underlying_cover > 100 ~
+          100 / underlying_cover,
+
+      TRUE ~ scale_factor
+    ),
+
+    # Preserve original proportional scaling approach
+    # Do not scale the sand percentage itself
+    cover_clean = if_else(
+      taxon == "SAND",
+      cover_raw,
+      cover_raw * scale_factor
+    )
+  )
+
+# Verify adjustments
+cover_2025_adj %>%
+  distinct(
+    survey_id,
+    SAND,
+    underlying_cover,
+    scale_factor
+  ) %>%
+  summarise(
+    n_surveys = n(),
+    n_adjusted = sum(scale_factor < 1),
+    n_adjusted_sand_unknown = sum(
+      scale_factor < 1 & is.na(SAND)
+    ),
+    n_adjusted_sand_known = sum(
+      scale_factor < 1 & !is.na(SAND)
+    )
+  )
+```
+
+
+```{r}
+cover_2025_survey <- cover_2025_adj %>%
+  group_by(
+    survey_id, year, date, site,
+    plot_type, arkev_unit
+  ) %>%
+  summarise(
+    CCA = sum(cover_clean[taxon == "CCA"], na.rm = TRUE),
+    ACA = sum(cover_clean[taxon == "ACA"], na.rm = TRUE),
+    ER = sum(cover_clean[taxon == "ER"], na.rm = TRUE),
+    BR = sum(cover_clean[taxon == "BR"], na.rm = TRUE),
+    turf = sum(cover_clean[taxon == "turf"], na.rm = TRUE),
+
+    FLESHY = sum(cover_clean[taxon == "FLESHY"], na.rm = TRUE),
+    SCUM = sum(cover_clean[taxon == "SCUM"], na.rm = TRUE),
+
+    # Preserve measured/inferred sand and unknown values
+    SAND = first(SAND),
+    sand_source = first(sand_source),
+
+    .groups = "drop"
+  ) %>%
+  mutate(
+    algal_cover = CCA + ACA + ER + BR + turf,
+    hard_substrate = 100 - SAND
+  )
+
+# Verify updated dataset
+cover_2025_survey %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_sand_available = sum(!is.na(SAND)),
+    n_sand_unknown = sum(is.na(SAND)),
+    n_sand_measured = sum(sand_source == "Measured"),
+    n_sand_inferred = sum(sand_source == "Inferred 0%"),
+    n_algal_over_100 = sum(algal_cover > 100.001, na.rm = TRUE),
+    n_algal_over_hard = sum(
+      algal_cover > hard_substrate + 0.001,
+      na.rm = TRUE
+    )
+  )
+```
+
+```{r}
+# Check FLESHY and SCUM after cover adjustments
+
+cover_2025_survey %>%
+  summarise(
+    n_surveys = n(),
+
+    n_fleshy_present = sum(FLESHY > 0, na.rm = TRUE),
+    n_scum_present = sum(SCUM > 0, na.rm = TRUE),
+
+    n_fleshy_over_100 = sum(
+      FLESHY > 100.001, na.rm = TRUE
+    ),
+
+    n_scum_over_100 = sum(
+      SCUM > 100.001, na.rm = TRUE
+    ),
+
+    max_fleshy = max(FLESHY, na.rm = TRUE),
+    max_scum = max(SCUM, na.rm = TRUE)
+  )
+
+# Check for explicitly missing cover measurements
+cover_2025 %>%
+  group_by(taxon) %>%
+  summarise(
+    n_records = n(),
+    n_missing = sum(is.na(cover_raw)),
+    .groups = "drop"
+  )
+```
+
+```{R}
+# Check missing values in 2026 cover measurements
+
+cover %>%
+  mutate(
+    across(
+      c(SAND, COBBLE, BOULDER, `BEDROCK/REEF`,
+        FR, ER, CCA, ACA, FG, brown,
+        turf, scum, BR),
+      ~ as.numeric(unlist(.x))
+    )
+  ) %>%
+  summarise(
+    n_surveys = n(),
+
+    across(
+      c(SAND, COBBLE, BOULDER, `BEDROCK/REEF`,
+        FR, ER, CCA, ACA, FG, brown,
+        turf, scum, BR),
+      ~ sum(is.na(.x)),
+      .names = "missing_{.col}"
+    )
+  ) %>%
+  print(width = Inf)
+```
+
+```{R}
+# Define 2026 cover variables
+substrate_vars <- c(
+  "SAND", "COBBLE", "BOULDER", "BEDROCK/REEF"
+)
+
+algal_vars <- c(
+  "FR", "ER", "CCA", "ACA", "FG",
+  "brown", "turf", "scum", "BR"
+)
+
+# Identify surveys with missing cover measurements
+cover_missing_2026 <- cover %>%
+  mutate(
+    across(
+      all_of(c(substrate_vars, algal_vars)),
+      ~ suppressWarnings(as.numeric(unlist(.x)))
+    )
+  ) %>%
+  mutate(
+    n_substrate_missing = rowSums(
+      is.na(across(all_of(substrate_vars)))
+    ),
+
+    n_algal_missing = rowSums(
+      is.na(across(all_of(algal_vars)))
+    )
+  ) %>%
+  filter(
+    n_substrate_missing > 0 |
+      n_algal_missing > 0
+  )
+
+# Examine incomplete surveys
+cover_missing_2026 %>%
+  select(
+    date, site, plot_type, arkev_unit,
+    n_substrate_missing,
+    n_algal_missing
+  ) %>%
+  arrange(date, site, plot_type, arkev_unit) %>%
+  print(n = Inf)
+```
+
+```{r}
+cover %>%
+  filter(
+    date == as.Date("2026-04-18"),
+    site == "noyo",
+    plot_type == "control",
+    arkev_unit == "8D"
+  ) %>%
+  select(
+    date, site, plot_type, arkev_unit,
+    all_of(substrate_vars),
+    all_of(algal_vars),
+    notes
+  ) %>%
+  print(width = Inf)
+```
+
+```{r}
+cover_2026 <- cover %>%
+  mutate(
+    across(
+      c(FR, ER, CCA, ACA, FG, brown,
+        turf, scum, BR, SAND),
+      ~ suppressWarnings(as.numeric(unlist(.x)))
+    )
+  ) %>%
+  transmute(
+    year,
+    month,
+    date,
+    survey_id,
+    site,
+    plot_type,
+    arkev_unit,
+
+    CCA,
+    ACA,
+    ER,
+    BR,
+    turf,
+
+    # Preserve NA when cover wasn't measured
+    FLESHY = rowSums(
+      pick(FR, FG, brown),
+      na.rm = FALSE
+    ),
+
+    SCUM = scum,
+    SAND
+  ) %>%
+  mutate(
+    # Underlying algal cover
+    algal_cover = CCA + ACA + ER + BR + turf
+  )
+
+# Verify missingness
+cover_2026 %>%
+  summarise(
+    n_surveys = n(),
+    n_sand_missing = sum(is.na(SAND)),
+    n_algal_missing = sum(is.na(algal_cover)),
+    n_fleshy_missing = sum(is.na(FLESHY)),
+    n_sand_available_algal_missing = sum(
+      !is.na(SAND) & is.na(algal_cover)
+    )
+  )
+```
+
+##combine 2025-2026 cover
+```{r}
+cover_compare <- bind_rows(
+
+  # 2025 cover
+  cover_2025_survey %>%
+    transmute(
+      year,
+      survey_id,
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      CCA,
+      ACA,
+      ER,
+      BR,
+      turf,
+      algal_cover,
+      FLESHY,
+      SCUM,
+      SAND,
+      sand_source
+    ),
+
+  # 2026 cover
+  cover_2026 %>%
+    transmute(
+      year,
+      survey_id,
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      CCA,
+      ACA,
+      ER,
+      BR,
+      turf,
+      algal_cover,
+      FLESHY,
+      SCUM,
+      SAND,
+
+      sand_source = if_else(
+        !is.na(SAND),
+        "Measured",
+        "Missing"
+      )
+    )
+)
+
+# Verify combined cover dataset
+cover_compare %>%
+  group_by(year, site, plot_type) %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_missing_sand = sum(is.na(SAND)),
+    n_missing_algal = sum(is.na(algal_cover)),
+    n_missing_fleshy = sum(is.na(FLESHY)),
+    .groups = "drop"
+  ) %>%
+  arrange(year, site, plot_type)
+```
+
+```{r}
+community_cover_2025_2026 <- community_locations_2025_2026 %>%
+  left_join(
+    cover_compare %>%
+      mutate(cover_survey_present = TRUE) %>%
+      select(
+        survey_id,
+        CCA, ACA, ER, BR, turf,
+        FLESHY, SCUM,
+        algal_cover,
+        SAND,
+        sand_source,
+        cover_survey_present
+      ),
+    by = "survey_id",
+    relationship = "many-to-one"
+  ) %>%
+  mutate(
+    cover_survey_present = coalesce(
+      cover_survey_present, FALSE
+    )
+  )
+
+# Verify the joined dataset
+community_cover_2025_2026 %>%
+  group_by(year, site, plot_type) %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+
+    n_no_cover_survey = sum(!cover_survey_present),
+
+    n_missing_algal = sum(is.na(algal_cover)),
+    n_missing_sand = sum(is.na(SAND)),
+
+    n_all_zero_biology = sum(total_community == 0),
+
+    .groups = "drop"
+  ) %>%
+  arrange(year, site, plot_type)
+```
+
+```{r}
+community_cover_2025_2026 %>%
+  filter(total_community == 0) %>%
+  select(
     year,
     date,
     site,
     plot_type,
     arkev_unit,
-    
-    # Grazers
-    all_of(grazers),
-    
-    # Kelp
-    all_of(kelp),
-    
-    # Inverts
-    all_of(inverts)
-  )
-
-dim(ki_2025_2026)
-
-names(ki_2025_2026)
+    physical_location_id,
+    SAND,
+    sand_source,
+    algal_cover,
+    FLESHY,
+    SCUM,
+    cover_survey_present
+  ) %>%
+  arrange(year, date, site, plot_type, arkev_unit) %>%
+  print(n = Inf, width = Inf)
 ```
 
 ```{r}
-ki_2025_2026 %>%
-  summarise(
-    across(
-      all_of(c(grazers, kelp, inverts)),
-      list(
-        n_NA = ~ sum(is.na(.)),
-        n_zero = ~ sum(. == 0, na.rm = TRUE)
-      )
-    )
-  )
-```
-
-```{r}
-ki_2025_2026 %>%
+cover %>%
   filter(
-    if_any(
-      all_of(c(grazers, kelp, inverts)),
-      is.na
+    site == "big_river",
+    (
+      date == as.Date("2026-06-24") &
+        plot_type == "control" &
+        arkev_unit == "8E"
+    ) |
+    (
+      date == as.Date("2026-06-15") &
+        plot_type == "arkev" &
+        arkev_unit == "10B"
     )
   ) %>%
   select(
-    survey_id,
+    date, plot_type, arkev_unit,
+    SAND, COBBLE, BOULDER, `BEDROCK/REEF`,
+    CCA, ACA, ER, BR, turf,
+    FR, FG, brown, scum,
+    notes
+  ) %>%
+  print(width = Inf)
+```
+
+```{r}
+community_cover_2025_2026 %>%
+  filter(!is.na(SAND)) %>%
+  mutate(
+    sand_category = case_when(
+      SAND == 0 ~ "0%",
+      SAND > 0 & SAND < 50 ~ "1–49%",
+      SAND >= 50 & SAND < 90 ~ "50–89%",
+      SAND >= 90 & SAND < 100 ~ "90–99%",
+      SAND == 100 ~ "100%",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  group_by(year, sand_category) %>%
+  summarise(
+    n_surveys = n(),
+    n_all_zero = sum(total_community == 0),
+    pct_all_zero = round(
+      100 * mean(total_community == 0), 1
+    ),
+    mean_abundance = mean(total_community),
+    median_abundance = median(total_community),
+    .groups = "drop"
+  ) %>%
+  arrange(year, sand_category)
+```
+
+```{r}
+ggplot(
+  community_cover_2025_2026 %>%
+    filter(!is.na(SAND)),
+  aes(
+    x = SAND,
+    y = total_community,
+    color = plot_type
+  )
+) +
+  geom_point(
+    alpha = 0.5,
+    size = 2,
+    position = position_jitter(
+      width = 1.5,
+      height = 0
+    )
+  ) +
+  facet_grid(site ~ year) +
+  scale_y_continuous(
+    trans = "log1p"
+  ) +
+  labs(
+    title = "Biological abundance across sand cover",
+    subtitle = "Complete biological surveys with available sand measurements",
+    x = "Sand cover (%)",
+    y = "Total biological abundance (log1p scale)",
+    color = "Treatment"
+  ) +
+  theme_classic()
+```
+
+```{R}
+library(vegan)
+
+# Complete community species list
+community_vars <- c(grazers, shared_kelp, inverts)
+
+# Create a separate dataset for Bray-Curtis
+community_bray_2025_2026 <- community_cover_2025_2026 %>%
+  filter(total_community > 0)
+
+# Extract the 23 biological variables
+community_matrix <- community_bray_2025_2026 %>%
+  select(all_of(community_vars))
+
+# Verify
+tibble(
+  n_surveys = nrow(community_matrix),
+  n_species = ncol(community_matrix),
+  n_missing = sum(is.na(community_matrix)),
+  n_all_zero = sum(rowSums(community_matrix) == 0)
+)
+```
+
+```{r}
+# Square-root transform the community abundances
+community_matrix_sqrt <- sqrt(
+  as.matrix(community_matrix)
+)
+
+# Calculate Bray-Curtis dissimilarities
+community_bray_dist <- vegan::vegdist(
+  community_matrix_sqrt,
+  method = "bray"
+)
+
+# Verify the distance matrix
+tibble(
+  n_surveys = attr(community_bray_dist, "Size"),
+  n_distances = length(community_bray_dist),
+  n_missing = sum(is.na(community_bray_dist)),
+  min_distance = min(community_bray_dist),
+  mean_distance = mean(community_bray_dist),
+  max_distance = max(community_bray_dist)
+)
+```
+
+```{r}
+# Examine repeated sampling of physical locations
+
+community_bray_2025_2026 %>%
+  group_by(
+    year,
+    site,
+    plot_type,
+    physical_location_id
+  ) %>%
+  summarise(
+    n_surveys = n(),
+    n_dates = n_distinct(date),
+    .groups = "drop"
+  ) %>%
+  group_by(year, site, plot_type) %>%
+  summarise(
+    n_locations = n(),
+    total_surveys = sum(n_surveys),
+    min_surveys_per_location = min(n_surveys),
+    median_surveys_per_location = median(n_surveys),
+    max_surveys_per_location = max(n_surveys),
+    .groups = "drop"
+  ) %>%
+  arrange(year, site, plot_type)
+```
+
+```{r}
+community_bray_2025_2026 %>%
+  group_by(
+    year, site, date, plot_type
+  ) %>%
+  summarise(
+    n_surveys = n(),
+    n_locations = n_distinct(physical_location_id),
+    n_plots = n_distinct(plot_number),
+    .groups = "drop"
+  ) %>%
+  arrange(year, site, date, plot_type) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Check treatment pairing within sampling dates and plots
+
+plot_date_coverage <- community_cover_2025_2026 %>%
+  group_by(
+    year, site, date,
+    plot_number, plot_type
+  ) %>%
+  summarise(
+    n_subplots = n(),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = plot_type,
+    values_from = n_subplots,
+    values_fill = 0
+  )
+
+# Summarize plot-level treatment pairing
+plot_date_coverage %>%
+  group_by(year, site, date) %>%
+  summarise(
+    n_plots = n(),
+
+    n_paired_plots = sum(
+      arkev > 0 & control > 0
+    ),
+
+    n_arkev_only = sum(
+      arkev > 0 & control == 0
+    ),
+
+    n_control_only = sum(
+      arkev == 0 & control > 0
+    ),
+
+    .groups = "drop"
+  ) %>%
+  arrange(year, site, date) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Aggregate biological communities by plot and sampling date
+
+community_plot_date <- community_cover_2025_2026 %>%
+  group_by(
+    year,
+    site,
+    date,
+    plot_number,
+    plot_type
+  ) %>%
+  summarise(
+    across(
+      all_of(community_vars),
+      ~ mean(.x)
+    ),
+
+    n_subplots = n(),
+
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_community = rowSums(
+      across(all_of(community_vars))
+    )
+  )
+
+# Verify aggregation
+community_plot_date %>%
+  group_by(year, site, plot_type) %>%
+  summarise(
+    n_plot_dates = n(),
+    min_subplots = min(n_subplots),
+    median_subplots = median(n_subplots),
+    max_subplots = max(n_subplots),
+    n_all_zero = sum(total_community == 0),
+    n_missing = sum(is.na(across(all_of(community_vars)))),
+    .groups = "drop"
+  ) %>%
+  arrange(year, site, plot_type)
+```
+
+```{r}
+community_plot_date %>%
+  filter(total_community == 0) %>%
+  select(
     year,
     date,
     site,
     plot_type,
-    arkev_unit
-  )
+    plot_number,
+    n_subplots,
+    total_community
+  ) %>%
+  arrange(year, date, site, plot_type, plot_number)
 ```
 
-```{R}
-ki_2025_2026 <- ki_2025_2026 %>%
+```{r}
+# Retain the complete plot-date dataset
+# Create a separate dataset for Bray-Curtis
+
+community_plot_date_bray <- community_plot_date %>%
+  filter(total_community > 0)
+
+# Square-root transform the 23 biological variables
+community_plot_matrix_sqrt <- community_plot_date_bray %>%
+  select(all_of(community_vars)) %>%
+  as.matrix() %>%
+  sqrt()
+
+# Calculate Bray-Curtis dissimilarities
+community_plot_bray_dist <- vegan::vegdist(
+  community_plot_matrix_sqrt,
+  method = "bray"
+)
+
+# Verify
+tibble(
+  n_plot_dates = nrow(community_plot_date_bray),
+  n_species = ncol(community_plot_matrix_sqrt),
+  n_missing = sum(is.na(community_plot_bray_dist)),
+  min_distance = min(community_plot_bray_dist),
+  mean_distance = mean(community_plot_bray_dist),
+  max_distance = max(community_plot_bray_dist)
+)
+```
+
+##site and year permanova
+```{r}
+library(vegan)
+library(permute)
+
+# Big River 2025: dates with all 10 treatment pairs
+paired_dates_br25 <- community_plot_date %>%
+  filter(year == 2025, site == "big_river") %>%
+  group_by(date, plot_number) %>%
+  summarise(
+    n_treatments = n_distinct(plot_type),
+    .groups = "drop"
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    n_paired = sum(n_treatments == 2),
+    .groups = "drop"
+  ) %>%
+  filter(n_paired == 10) %>%
+  pull(date)
+
+# Average abundance across shared sampling dates
+br25_paired <- community_plot_date %>%
   filter(
-    !if_any(
-      all_of(c(grazers, kelp, inverts)),
-      is.na
-    )
+    year == 2025,
+    site == "big_river",
+    date %in% paired_dates_br25
+  ) %>%
+  group_by(plot_number, plot_type) %>%
+  summarise(
+    across(all_of(community_vars), mean),
+    .groups = "drop"
+  ) %>%
+  arrange(plot_number, plot_type)
+
+# Square-root transformed Bray-Curtis distances
+br25_dist <- br25_paired %>%
+  select(all_of(community_vars)) %>%
+  as.matrix() %>%
+  sqrt() %>%
+  vegdist(method = "bray")
+
+# Paired PERMANOVA
+set.seed(123)
+
+br25_permanova <- adonis2(
+  br25_dist ~ factor(plot_number) + plot_type,
+  data = br25_paired,
+  permutations = how(
+    blocks = br25_paired$plot_number,
+    nperm = 999
+  ),
+  by = "margin"
+)
+
+br25_permanova
+```
+
+```{r}
+# Big River 2025: homogeneity of multivariate dispersion
+
+br25_disp <- vegan::betadisper(
+  br25_dist,
+  group = br25_paired$plot_type,
+  type = "median"
+)
+
+# Mean distance to group spatial median
+aggregate(
+  br25_disp$distances,
+  by = list(treatment = br25_paired$plot_type),
+  FUN = mean
+)
+
+# Permutation test restricted within paired plots
+set.seed(123)
+
+vegan::permutest(
+  br25_disp,
+  permutations = permute::how(
+    blocks = br25_paired$plot_number,
+    nperm = 999
+  )
+)
+```
+
+```{r}
+# Big River 2026: identify fully paired dates
+
+paired_dates_br26 <- community_plot_date %>%
+  filter(
+    year == 2026,
+    site == "big_river"
+  ) %>%
+  group_by(date, plot_number) %>%
+  summarise(
+    n_treatments = n_distinct(plot_type),
+    .groups = "drop"
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    n_paired = sum(n_treatments == 2),
+    .groups = "drop"
+  ) %>%
+  filter(n_paired == 10) %>%
+  pull(date)
+
+# Average community abundance across paired sampling dates
+br26_paired <- community_plot_date %>%
+  filter(
+    year == 2026,
+    site == "big_river",
+    date %in% paired_dates_br26
+  ) %>%
+  group_by(plot_number, plot_type) %>%
+  summarise(
+    across(all_of(community_vars), mean),
+    .groups = "drop"
+  ) %>%
+  arrange(plot_number, plot_type)
+
+# Square-root transformed Bray-Curtis
+br26_dist <- br26_paired %>%
+  select(all_of(community_vars)) %>%
+  as.matrix() %>%
+  sqrt() %>%
+  vegan::vegdist(method = "bray")
+
+# Paired PERMANOVA
+set.seed(123)
+
+br26_permanova <- vegan::adonis2(
+  br26_dist ~ factor(plot_number) + plot_type,
+  data = br26_paired,
+  permutations = permute::how(
+    blocks = br26_paired$plot_number,
+    nperm = 999
+  ),
+  by = "margin"
+)
+
+br26_permanova
+```
+
+```{r}
+# Big River 2026: multivariate dispersion
+
+br26_disp <- vegan::betadisper(
+  br26_dist,
+  group = br26_paired$plot_type,
+  type = "median"
+)
+
+# Mean distance to group spatial median
+aggregate(
+  br26_disp$distances,
+  by = list(treatment = br26_paired$plot_type),
+  FUN = mean
+)
+
+# Restricted permutation test
+set.seed(123)
+
+vegan::permutest(
+  br26_disp,
+  permutations = permute::how(
+    blocks = br26_paired$plot_number,
+    nperm = 999
+  )
+)
+```
+
+```{r}
+# Noyo 2026: identify fully paired dates
+
+paired_dates_noyo26 <- community_plot_date %>%
+  filter(
+    year == 2026,
+    site == "noyo"
+  ) %>%
+  group_by(date, plot_number) %>%
+  summarise(
+    n_treatments = n_distinct(plot_type),
+    .groups = "drop"
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    n_paired = sum(n_treatments == 2),
+    .groups = "drop"
+  ) %>%
+  filter(n_paired == 10) %>%
+  pull(date)
+
+# Average abundance across fully paired sampling dates
+noyo26_paired <- community_plot_date %>%
+  filter(
+    year == 2026,
+    site == "noyo",
+    date %in% paired_dates_noyo26
+  ) %>%
+  group_by(plot_number, plot_type) %>%
+  summarise(
+    across(all_of(community_vars), mean),
+    .groups = "drop"
+  ) %>%
+  arrange(plot_number, plot_type)
+
+# Square-root transformed Bray-Curtis
+noyo26_dist <- noyo26_paired %>%
+  select(all_of(community_vars)) %>%
+  as.matrix() %>%
+  sqrt() %>%
+  vegan::vegdist(method = "bray")
+
+# Paired PERMANOVA
+set.seed(123)
+
+noyo26_permanova <- vegan::adonis2(
+  noyo26_dist ~ factor(plot_number) + plot_type,
+  data = noyo26_paired,
+  permutations = permute::how(
+    blocks = noyo26_paired$plot_number,
+    nperm = 999
+  ),
+  by = "margin"
+)
+
+noyo26_permanova
+```
+
+```{r}
+# Noyo 2026: multivariate dispersion
+
+noyo26_disp <- vegan::betadisper(
+  noyo26_dist,
+  group = noyo26_paired$plot_type,
+  type = "median"
+)
+
+# Mean distance to group spatial median
+aggregate(
+  noyo26_disp$distances,
+  by = list(treatment = noyo26_paired$plot_type),
+  FUN = mean
+)
+
+# Permutation test restricted within paired plots
+set.seed(123)
+
+vegan::permutest(
+  noyo26_disp,
+  permutations = permute::how(
+    blocks = noyo26_paired$plot_number,
+    nperm = 999
+  )
+)
+```
+
+```{r}
+# Noyo 2026: species-level treatment differences
+
+noyo26_species <- noyo26_paired %>%
+  select(plot_number, plot_type, all_of(community_vars)) %>%
+  tidyr::pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  group_by(species, plot_type) %>%
+  summarise(
+    mean_abundance = mean(abundance),
+    .groups = "drop"
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = plot_type,
+    values_from = mean_abundance
+  ) %>%
+  mutate(
+    difference = arkev - control,
+    absolute_difference = abs(difference)
+  ) %>%
+  arrange(desc(absolute_difference))
+
+# Display the largest differences
+noyo26_species %>%
+  select(
+    species,
+    arkev,
+    control,
+    difference
+  ) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Noyo 2026: paired differences for dominant grazers
+
+noyo26_grazer_pairs <- noyo26_paired %>%
+  select(
+    plot_number,
+    plot_type,
+    tegula,
+    `purple_urchins_>2cm`,
+    red_urchins
+  ) %>%
+  pivot_longer(
+    cols = c(
+      tegula,
+      `purple_urchins_>2cm`,
+      red_urchins
+    ),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = plot_type,
+    values_from = abundance
+  ) %>%
+  mutate(
+    difference = arkev - control
   )
 
-ki_2025_2026 %>%
+# Summarize consistency across the ten plot pairs
+noyo26_grazer_pairs %>%
+  group_by(species) %>%
   summarise(
-    n_surveys = n(),
-    n_unique_surveys = n_distinct(survey_id),
-    n_2025 = sum(year == 2025),
-    n_2026 = sum(year == 2026),
-    n_sites = n_distinct(site)
-  )
-
-ki_2025_2026 %>%
-  summarise(
-    total_biological_NA = sum(
-      is.na(
-        across(
-          all_of(c(grazers, kelp, inverts))
-        )
-      )
-    )
+    mean_difference = mean(difference),
+    median_difference = median(difference),
+    plots_higher_arkev = sum(difference > 0),
+    plots_higher_control = sum(difference < 0),
+    plots_equal = sum(difference == 0),
+    .groups = "drop"
   )
 ```
 
 ```{r}
-ki_2025_2026 %>%
-  count(year, site)
+# Noyo 2026: grazer-only community PERMANOVA
+
+# Extract the six grazer variables
+noyo26_grazer_matrix <- noyo26_paired %>%
+  select(all_of(grazers)) %>%
+  as.matrix() %>%
+  sqrt()
+
+# Bray-Curtis dissimilarity
+noyo26_grazer_dist <- vegan::vegdist(
+  noyo26_grazer_matrix,
+  method = "bray"
+)
+
+# Paired PERMANOVA
+set.seed(123)
+
+noyo26_grazer_permanova <- vegan::adonis2(
+  noyo26_grazer_dist ~ factor(plot_number) + plot_type,
+  data = noyo26_paired,
+  permutations = permute::how(
+    blocks = noyo26_paired$plot_number,
+    nperm = 999
+  ),
+  by = "margin"
+)
+
+noyo26_grazer_permanova
 ```
+
+```{r}
+# Noyo 2026: grazer community dispersion
+
+noyo26_grazer_disp <- vegan::betadisper(
+  noyo26_grazer_dist,
+  group = noyo26_paired$plot_type,
+  type = "median"
+)
+
+# Mean distance to group spatial median
+aggregate(
+  noyo26_grazer_disp$distances,
+  by = list(treatment = noyo26_paired$plot_type),
+  FUN = mean
+)
+
+# Restricted permutation test
+set.seed(123)
+
+vegan::permutest(
+  noyo26_grazer_disp,
+  permutations = permute::how(
+    blocks = noyo26_paired$plot_number,
+    nperm = 999
+  )
+)
+```
+
+```{r}
+# Noyo 2026: exact paired permutation tests for all grazers
+
+noyo26_grazer_tests <- noyo26_paired %>%
+  select(plot_number, plot_type, all_of(grazers)) %>%
+  tidyr::pivot_longer(
+    cols = all_of(grazers),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = plot_type,
+    values_from = abundance
+  ) %>%
+  mutate(difference = arkev - control) %>%
+  group_by(species) %>%
+  summarise(
+    mean_difference = mean(difference),
+
+    p_value = {
+      d <- difference
+
+      # Enumerate all possible treatment-label swaps
+      signs <- as.matrix(
+        expand.grid(
+          rep(list(c(-1, 1)), length(d))
+        )
+      )
+
+      null_means <- as.vector(signs %*% d) / length(d)
+
+      # Two-sided exact permutation p-value
+      mean(
+        abs(null_means) >= abs(mean(d)) - 1e-12
+      )
+    },
+
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adjusted = p.adjust(
+      p_value,
+      method = "BH"
+    )
+  ) %>%
+  arrange(p_adjusted)
+
+noyo26_grazer_tests
+```
+
+```{r}
+# Big River 2025: grazer-only PERMANOVA
+
+br25_grazer_matrix <- br25_paired %>%
+  select(all_of(grazers)) %>%
+  as.matrix() %>%
+  sqrt()
+
+br25_grazer_dist <- vegan::vegdist(
+  br25_grazer_matrix,
+  method = "bray"
+)
+
+set.seed(123)
+
+br25_grazer_permanova <- vegan::adonis2(
+  br25_grazer_dist ~ factor(plot_number) + plot_type,
+  data = br25_paired,
+  permutations = permute::how(
+    blocks = br25_paired$plot_number,
+    nperm = 999
+  ),
+  by = "margin"
+)
+
+br25_grazer_permanova
+```
+
+```{r}
+# Big River 2025: grazer community dispersion
+
+br25_grazer_disp <- vegan::betadisper(
+  br25_grazer_dist,
+  group = br25_paired$plot_type,
+  type = "median"
+)
+
+# Mean distance to group median
+aggregate(
+  br25_grazer_disp$distances,
+  by = list(treatment = br25_paired$plot_type),
+  FUN = mean
+)
+
+# Paired permutation test
+set.seed(123)
+
+vegan::permutest(
+  br25_grazer_disp,
+  permutations = permute::how(
+    blocks = br25_paired$plot_number,
+    nperm = 999
+  )
+)
+```
+
+```{r}
+# Big River 2026: grazer-only community PERMANOVA
+
+br26_grazer_matrix <- br26_paired %>%
+  select(all_of(grazers)) %>%
+  as.matrix() %>%
+  sqrt()
+
+# Check for entirely empty grazer communities
+sum(rowSums(br26_grazer_matrix) == 0)
+
+# Calculate Bray-Curtis
+br26_grazer_dist <- vegan::vegdist(
+  br26_grazer_matrix,
+  method = "bray"
+)
+
+# Paired PERMANOVA
+set.seed(123)
+
+br26_grazer_permanova <- vegan::adonis2(
+  br26_grazer_dist ~ factor(plot_number) + plot_type,
+  data = br26_paired,
+  permutations = permute::how(
+    blocks = br26_paired$plot_number,
+    nperm = 999
+  ),
+  by = "margin"
+)
+
+br26_grazer_permanova
+```
+
+```{r}
+# Big River 2026: grazer community dispersion
+
+br26_grazer_disp <- vegan::betadisper(
+  br26_grazer_dist,
+  group = br26_paired$plot_type,
+  type = "median"
+)
+
+# Mean distance to group spatial median
+aggregate(
+  br26_grazer_disp$distances,
+  by = list(treatment = br26_paired$plot_type),
+  FUN = mean
+)
+
+# Restricted permutation test
+set.seed(123)
+
+vegan::permutest(
+  br26_grazer_disp,
+  permutations = permute::how(
+    blocks = br26_paired$plot_number,
+    nperm = 999
+  )
+)
+```
+##merge subplots among years
+```{r}
+# Identify physical locations sampled in both years
+
+shared_physical_locations <- community_cover_2025_2026 %>%
+  group_by(site, physical_location_id, year) %>%
+  summarise(
+    treatment = first(plot_type),
+    n_surveys = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    year = paste0("year_", year)
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = year,
+    values_from = c(treatment, n_surveys)
+  ) %>%
+  filter(
+    !is.na(treatment_year_2025),
+    !is.na(treatment_year_2026)
+  )
+
+# Summarize treatment classifications across years
+shared_physical_locations %>%
+  count(
+    site,
+    treatment_year_2025,
+    treatment_year_2026,
+    name = "n_shared_locations"
+  ) %>%
+  arrange(site, treatment_year_2025, treatment_year_2026)
+```
+
+```{r}
+# Sampling coverage at physical locations shared between years
+
+shared_location_months <- community_cover_2025_2026 %>%
+  semi_join(
+    shared_physical_locations %>%
+      select(site, physical_location_id),
+    by = c("site", "physical_location_id")
+  ) %>%
+  mutate(
+    sampling_month = lubridate::month(date)
+  ) %>%
+  group_by(
+    site,
+    year,
+    sampling_month,
+    plot_type
+  ) %>%
+  summarise(
+    n_surveys = n(),
+    n_locations = n_distinct(physical_location_id),
+    .groups = "drop"
+  ) %>%
+  arrange(site, sampling_month, year, plot_type)
+
+print(shared_location_months, n = Inf)
+```
+
+```{r}
+# Identify physical locations sampled in the same month
+# in both 2025 and 2026
+
+matched_location_months <- community_cover_2025_2026 %>%
+  semi_join(
+    shared_physical_locations %>%
+      select(site, physical_location_id),
+    by = c("site", "physical_location_id")
+  ) %>%
+  mutate(
+    sampling_month = lubridate::month(date)
+  ) %>%
+  count(
+    site,
+    physical_location_id,
+    sampling_month,
+    year,
+    name = "n_surveys"
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = year,
+    values_from = n_surveys,
+    names_prefix = "surveys_"
+  ) %>%
+  filter(
+    !is.na(surveys_2025),
+    !is.na(surveys_2026)
+  ) %>%
+  left_join(
+    shared_physical_locations %>%
+      select(
+        site,
+        physical_location_id,
+        treatment_year_2026
+      ),
+    by = c("site", "physical_location_id")
+  )
+
+# Summarize the actual matched location-months
+
+matched_location_months %>%
+  group_by(
+    site,
+    sampling_month,
+    treatment_year_2026
+  ) %>%
+  summarise(
+    n_matched_locations = n_distinct(physical_location_id),
+    n_matched_location_months = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(site, sampling_month, treatment_year_2026) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Big River: cross-year coverage at the experimental plot level
+
+br_plot_month_coverage <- community_plot_date %>%
+  filter(
+    site == "big_river",
+    plot_number %in% 1:7,
+    lubridate::month(date) %in% c(5, 6, 8, 9)
+  ) %>%
+  mutate(
+    sampling_month = lubridate::month(date)
+  ) %>%
+  group_by(
+    year,
+    sampling_month,
+    plot_number,
+    plot_type
+  ) %>%
+  summarise(
+    n_dates = n(),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = n_dates,
+    names_prefix = "dates_",
+    values_fill = 0
+  ) %>%
+  mutate(
+    matched_years =
+      dates_2025 > 0 & dates_2026 > 0
+  )
+
+# Summarize matched experimental plots
+
+br_plot_month_coverage %>%
+  group_by(sampling_month, plot_type) %>%
+  summarise(
+    plots_2025 = sum(dates_2025 > 0),
+    plots_2026 = sum(dates_2026 > 0),
+    plots_matched = sum(matched_years),
+    .groups = "drop"
+  ) %>%
+  arrange(sampling_month, plot_type)
+```
+
+```{r}
+# Big River: matched plot-month community dataset
+
+br_cross_year <- community_plot_date %>%
+  filter(
+    site == "big_river",
+    plot_number %in% 1:7,
+    lubridate::month(date) %in% c(5, 6, 8, 9)
+  ) %>%
+  mutate(
+    sampling_month = lubridate::month(date)
+  ) %>%
+  group_by(
+    year,
+    sampling_month,
+    plot_number,
+    plot_type
+  ) %>%
+  summarise(
+    across(
+      all_of(community_vars),
+      ~ mean(.x)
+    ),
+    n_dates = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_community = rowSums(
+      across(all_of(community_vars))
+    )
+  )
+
+# Verify the matched dataset
+
+br_cross_year %>%
+  group_by(year, sampling_month, plot_type) %>%
+  summarise(
+    n_plots = n_distinct(plot_number),
+    n_observations = n(),
+    min_dates = min(n_dates),
+    max_dates = max(n_dates),
+    n_all_zero = sum(total_community == 0),
+    n_missing = sum(is.na(
+      as.matrix(pick(all_of(community_vars)))
+    )),
+    .groups = "drop"
+  ) %>%
+  arrange(year, sampling_month, plot_type)
+```
+
+```{r}
+# Big River: seasonally averaged communities
+# Matched plots 1–7, shared months May, June, August, September
+
+br_cross_year_season <- br_cross_year %>%
+  group_by(
+    year,
+    plot_number,
+    plot_type
+  ) %>%
+  summarise(
+    across(
+      all_of(community_vars),
+      ~ mean(.x)
+    ),
+
+    n_months = n(),
+
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_community = rowSums(
+      across(all_of(community_vars))
+    )
+  ) %>%
+  arrange(plot_number, plot_type, year)
+
+# Verify the seasonal dataset
+
+br_cross_year_season %>%
+  group_by(year, plot_type) %>%
+  summarise(
+    n_plots = n_distinct(plot_number),
+    n_observations = n(),
+    min_months = min(n_months),
+    max_months = max(n_months),
+    n_all_zero = sum(total_community == 0),
+    n_missing = sum(
+      is.na(as.matrix(pick(all_of(community_vars))))
+    ),
+    .groups = "drop"
+  )
+```
+
+###Big river
+```{r}
+# Big River: 2025–2026 multivariate difference-in-differences
+
+# Calculate the treatment-by-year contrast for each species
+# within each of the 7 matched experimental plots
+
+br_change <- br_cross_year_season %>%
+  select(
+    plot_number,
+    year,
+    plot_type,
+    all_of(community_vars)
+  ) %>%
+  mutate(
+    across(all_of(community_vars), sqrt)
+  ) %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = c(plot_type, year),
+    values_from = abundance,
+    names_glue = "{plot_type}_{year}"
+  ) %>%
+  mutate(
+    change_difference =
+      (arkev_2026 - arkev_2025) -
+      (control_2026 - control_2025)
+  )
+
+# Matrix: 7 plot pairs × 23 species
+br_change_matrix <- br_change %>%
+  select(plot_number, species, change_difference) %>%
+  pivot_wider(
+    names_from = species,
+    values_from = change_difference
+  ) %>%
+  arrange(plot_number) %>%
+  select(-plot_number) %>%
+  as.matrix()
+
+# Observed multivariate difference-in-differences
+observed_stat <- sum(
+  colMeans(br_change_matrix)^2
+)
+
+# Enumerate all 2^7 possible plot-level sign flips
+signs <- as.matrix(
+  expand.grid(
+    rep(list(c(-1, 1)), nrow(br_change_matrix))
+  )
+)
+
+permutation_stats <- apply(
+  signs, 1,
+  function(s) {
+    sum(
+      colMeans(
+        br_change_matrix * s
+      )^2
+    )
+  }
+)
+
+# Exact paired permutation p-value
+tibble(
+  n_plot_pairs = nrow(br_change_matrix),
+  n_species = ncol(br_change_matrix),
+  n_permutations = nrow(signs),
+  observed_statistic = observed_stat,
+  p_value = mean(
+    permutation_stats >= observed_stat - 1e-12
+  )
+)
+```
+
+```{r}
+# Big River: descriptive species changes between years
+
+br_species_changes <- br_cross_year_season %>%
+  group_by(year, plot_type) %>%
+  summarise(
+    across(all_of(community_vars), mean),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "mean_abundance"
+  ) %>%
+  pivot_wider(
+    names_from = c(plot_type, year),
+    values_from = mean_abundance,
+    names_glue = "{plot_type}_{year}"
+  ) %>%
+  mutate(
+    arkev_change = arkev_2026 - arkev_2025,
+    control_change = control_2026 - control_2025,
+
+    difference_in_changes =
+      arkev_change - control_change
+  ) %>%
+  arrange(desc(abs(difference_in_changes)))
+
+br_species_changes %>%
+  select(
+    species,
+    arkev_change,
+    control_change,
+    difference_in_changes
+  ) %>%
+  print(n = Inf)
+```
+`
+```{r}
+# Big River: consistency of species changes across plots
+
+br_plot_species_changes <- br_cross_year_season %>%
+  select(
+    plot_number,
+    year,
+    plot_type,
+    `purple_urchins_<2cm`,
+    `purple_urchins_>2cm`,
+    red_urchins,
+    LAMR,
+    NERJ,
+    DESSPP
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(
+      `purple_urchins_<2cm`,
+      `purple_urchins_>2cm`,
+      red_urchins,
+      LAMR,
+      NERJ,
+      DESSPP
+    ),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+# Summarize increases and decreases across plots
+
+br_plot_species_changes %>%
+  group_by(species, plot_type) %>%
+  summarise(
+    mean_change = mean(change),
+    median_change = median(change),
+    plots_increased = sum(change > 0),
+    plots_decreased = sum(change < 0),
+    plots_unchanged = sum(change == 0),
+    .groups = "drop"
+  ) %>%
+  arrange(species, plot_type)
+```
+
+```{r}
+# Big River: compare year-to-year changes
+# between ARKEV and control within each paired plot
+
+br_paired_changes <- br_plot_species_changes %>%
+  select(
+    plot_number,
+    species,
+    plot_type,
+    change
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = plot_type,
+    values_from = change
+  ) %>%
+  mutate(
+    difference_in_changes = arkev - control
+  )
+
+# Summarize consistency across the seven paired plots
+
+br_paired_changes %>%
+  group_by(species) %>%
+  summarise(
+    mean_difference = mean(difference_in_changes),
+    median_difference = median(difference_in_changes),
+
+    plots_greater_arkev_change =
+      sum(difference_in_changes > 0),
+
+    plots_greater_control_change =
+      sum(difference_in_changes < 0),
+
+    plots_equal = sum(difference_in_changes == 0),
+
+    .groups = "drop"
+  ) %>%
+  arrange(desc(abs(mean_difference)))
+```
+
+```{r}
+# Big River: exact paired cross-year tests for all 23 taxa
+
+br_species_tests <- br_cross_year_season %>%
+  select(
+    plot_number, year, plot_type,
+    all_of(community_vars)
+  ) %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = c(plot_type, year),
+    values_from = abundance,
+    names_glue = "{plot_type}_{year}"
+  ) %>%
+  mutate(
+    difference_in_changes =
+      (arkev_2026 - arkev_2025) -
+      (control_2026 - control_2025)
+  ) %>%
+  group_by(species) %>%
+  summarise(
+    mean_difference = mean(difference_in_changes),
+
+    p_value = {
+      d <- difference_in_changes
+
+      signs <- as.matrix(
+        expand.grid(
+          rep(list(c(-1, 1)), length(d))
+        )
+      )
+
+      null_means <- as.vector(signs %*% d) / length(d)
+
+      mean(
+        abs(null_means) >= abs(mean(d)) - 1e-12
+      )
+    },
+
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adjusted = p.adjust(p_value, method = "BH")
+  ) %>%
+  arrange(p_adjusted, p_value)
+
+br_species_tests %>%
+  print(n = Inf)
+```
+
+```{r}
+# Big River: overall site-level changes between years
+# Average ARKEV and control within each matched experimental plot
+
+br_site_year <- br_cross_year_season %>%
+  group_by(
+    year,
+    plot_number
+  ) %>%
+  summarise(
+    across(
+      all_of(community_vars),
+      mean
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_community = rowSums(
+      across(all_of(community_vars))
+    )
+  )
+
+# Descriptive changes in mean abundance across the site
+
+br_site_changes <- br_site_year %>%
+  group_by(year) %>%
+  summarise(
+    across(
+      all_of(community_vars),
+      mean
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "mean_abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = mean_abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  arrange(desc(abs(change)))
+
+br_site_changes %>%
+  print(n = Inf)
+```
+
+```{r}
+# Big River: overall community change between years
+# Seven matched plots, averaging equally across treatments
+
+br_site_change_matrix <- br_site_year %>%
+  select(
+    plot_number,
+    year,
+    all_of(community_vars)
+  ) %>%
+  mutate(
+    across(all_of(community_vars), sqrt)
+  ) %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  select(plot_number, species, change) %>%
+  pivot_wider(
+    names_from = species,
+    values_from = change
+  ) %>%
+  arrange(plot_number) %>%
+  select(-plot_number) %>%
+  as.matrix()
+
+# Observed multivariate change
+observed_stat <- sum(
+  colMeans(br_site_change_matrix)^2
+)
+
+# All possible paired sign permutations
+signs <- as.matrix(
+  expand.grid(
+    rep(
+      list(c(-1, 1)),
+      nrow(br_site_change_matrix)
+    )
+  )
+)
+
+permutation_stats <- apply(
+  signs, 1,
+  function(s) {
+    sum(
+      colMeans(br_site_change_matrix * s)^2
+    )
+  }
+)
+
+# Exact paired permutation result
+tibble(
+  n_matched_plots = nrow(br_site_change_matrix),
+  n_species = ncol(br_site_change_matrix),
+  n_permutations = nrow(signs),
+  observed_statistic = observed_stat,
+  p_value = mean(
+    permutation_stats >= observed_stat - 1e-12
+  )
+)
+```
+
+```{r}
+# Big River: ARKEV-only change between 2025 and 2026
+
+br_arkev_change_matrix <- br_cross_year_season %>%
+  filter(plot_type == "arkev") %>%
+  select(
+    plot_number,
+    year,
+    all_of(community_vars)
+  ) %>%
+  mutate(
+    across(all_of(community_vars), sqrt)
+  ) %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  select(plot_number, species, change) %>%
+  pivot_wider(
+    names_from = species,
+    values_from = change
+  ) %>%
+  arrange(plot_number) %>%
+  select(-plot_number) %>%
+  as.matrix()
+
+# Observed multivariate change
+br_arkev_observed <- sum(
+  colMeans(br_arkev_change_matrix)^2
+)
+
+# Exact plot-level sign-flip permutations
+br_arkev_signs <- as.matrix(
+  expand.grid(
+    rep(
+      list(c(-1, 1)),
+      nrow(br_arkev_change_matrix)
+    )
+  )
+)
+
+br_arkev_null <- apply(
+  br_arkev_signs,
+  1,
+  function(s) {
+    sum(
+      colMeans(br_arkev_change_matrix * s)^2
+    )
+  }
+)
+
+# Results
+tibble(
+  n_matched_plots = nrow(br_arkev_change_matrix),
+  n_species = ncol(br_arkev_change_matrix),
+  observed_statistic = br_arkev_observed,
+  p_value = mean(
+    br_arkev_null >= br_arkev_observed - 1e-12
+  )
+)
+```
+
+```{r}
+# Big River: control-only community change between years
+
+br_control_change_matrix <- br_cross_year_season %>%
+  filter(plot_type == "control") %>%
+  select(plot_number, year, all_of(community_vars)) %>%
+  mutate(across(all_of(community_vars), sqrt)) %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  select(plot_number, species, change) %>%
+  pivot_wider(
+    names_from = species,
+    values_from = change
+  ) %>%
+  arrange(plot_number) %>%
+  select(-plot_number) %>%
+  as.matrix()
+
+# Observed multivariate change
+br_control_observed <- sum(
+  colMeans(br_control_change_matrix)^2
+)
+
+# Enumerate all exact paired sign flips
+br_control_signs <- as.matrix(
+  expand.grid(
+    rep(list(c(-1, 1)), nrow(br_control_change_matrix))
+  )
+)
+
+br_control_null <- apply(
+  br_control_signs,
+  1,
+  function(s) {
+    sum(colMeans(br_control_change_matrix * s)^2)
+  }
+)
+
+# Results
+tibble(
+  n_matched_plots = nrow(br_control_change_matrix),
+  n_species = ncol(br_control_change_matrix),
+  observed_statistic = br_control_observed,
+  p_value = mean(
+    br_control_null >= br_control_observed - 1e-12
+  )
+)
+```
+
+###Noyo
+```{r}
+# Noyo: prepare July observations at shared physical locations
+
+noyo_july_matched <- community_cover_2025_2026 %>%
+  filter(
+    site == "noyo",
+    lubridate::month(date) == 7
+  ) %>%
+  semi_join(
+    matched_location_months %>%
+      filter(
+        site == "noyo",
+        sampling_month == 7
+      ) %>%
+      select(physical_location_id),
+    by = "physical_location_id"
+  ) %>%
+  left_join(
+    shared_physical_locations %>%
+      filter(site == "noyo") %>%
+      select(
+        physical_location_id,
+        treatment_year_2026
+      ),
+    by = "physical_location_id"
+  ) %>%
+  group_by(
+    physical_location_id,
+    treatment_year_2026,
+    year
+  ) %>%
+  summarise(
+    across(all_of(community_vars), mean),
+    n_surveys = n(),
+    .groups = "drop"
+  )
+
+# Verify matched locations and survey coverage
+
+noyo_july_matched %>%
+  group_by(year, treatment_year_2026) %>%
+  summarise(
+    n_locations = n_distinct(physical_location_id),
+    n_surveys = sum(n_surveys),
+    n_missing = sum(
+      is.na(as.matrix(pick(all_of(community_vars))))
+    ),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Noyo: changes in biological abundance at matched July locations
+
+noyo_july_changes <- noyo_july_matched %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+# Summarize changes by 2026 treatment classification
+
+noyo_july_species_changes <- noyo_july_changes %>%
+  group_by(treatment_year_2026, species) %>%
+  summarise(
+    n_locations = n(),
+    mean_2025 = mean(year_2025),
+    mean_2026 = mean(year_2026),
+    mean_change = mean(change),
+    locations_increased = sum(change > 0),
+    locations_decreased = sum(change < 0),
+    locations_unchanged = sum(change == 0),
+    .groups = "drop"
+  ) %>%
+  group_by(treatment_year_2026) %>%
+  arrange(desc(abs(mean_change)), .by_group = TRUE) %>%
+  slice_head(n = 10) %>%
+  ungroup()
+
+print(noyo_july_species_changes, n = Inf)
+```
+
+```{r}
+# Noyo: identify the 2026 experimental plots
+# represented by the 14 matched July locations
+
+noyo_july_plot_structure <- noyo_july_matched %>%
+  filter(year == 2026) %>%
+  select(
+    physical_location_id,
+    treatment_year_2026
+  ) %>%
+  left_join(
+    community_cover_2025_2026 %>%
+      filter(
+        year == 2026,
+        site == "noyo"
+      ) %>%
+      distinct(
+        physical_location_id,
+        plot_number,
+        plot_type
+      ),
+    by = "physical_location_id",
+    relationship = "many-to-one"
+  )
+
+# Summarize physical locations within plots
+
+noyo_july_plot_structure %>%
+  group_by(
+    treatment_year_2026,
+    plot_number
+  ) %>%
+  summarise(
+    n_matched_locations =
+      n_distinct(physical_location_id),
+    .groups = "drop"
+  ) %>%
+  arrange(
+    treatment_year_2026,
+    plot_number
+  ) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Noyo: plot-level July community averages
+# Group matched locations according to their 2026 plot structure
+
+noyo_july_plot_year <- noyo_july_matched %>%
+  left_join(
+    noyo_july_plot_structure %>%
+      select(
+        physical_location_id,
+        plot_number
+      ),
+    by = "physical_location_id",
+    relationship = "many-to-one"
+  ) %>%
+  group_by(
+    year,
+    plot_number,
+    treatment_year_2026
+  ) %>%
+  summarise(
+    across(
+      all_of(community_vars),
+      mean
+    ),
+    n_locations = n_distinct(physical_location_id),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_community = rowSums(
+      across(all_of(community_vars))
+    )
+  )
+
+# Verify the plot-level dataset
+
+noyo_july_plot_year %>%
+  group_by(year, treatment_year_2026) %>%
+  summarise(
+    n_plots = n_distinct(plot_number),
+    n_observations = n(),
+    min_locations = min(n_locations),
+    max_locations = max(n_locations),
+    n_all_zero = sum(total_community == 0),
+    n_missing = sum(
+      is.na(as.matrix(pick(all_of(community_vars))))
+    ),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Noyo: plot-level grazer changes between July 2025 and 2026
+
+noyo_plot_grazer_changes <- noyo_july_plot_year %>%
+  select(
+    plot_number,
+    treatment_year_2026,
+    year,
+    tegula,
+    `purple_urchins_>2cm`,
+    red_urchins
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(
+      tegula,
+      `purple_urchins_>2cm`,
+      red_urchins
+    ),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+# Summarize across the four plots by 2026 classification
+
+noyo_plot_grazer_changes %>%
+  group_by(treatment_year_2026, species) %>%
+  summarise(
+    mean_change = mean(change),
+    median_change = median(change),
+    plots_increased = sum(change > 0),
+    plots_decreased = sum(change < 0),
+    plots_unchanged = sum(change == 0),
+    .groups = "drop"
+  ) %>%
+  arrange(species, treatment_year_2026)
+```
+
+```{r}
+# Noyo: overall July community at matched locations
+# Average across 2026 treatment classifications
+# while accounting for the number of locations
+
+noyo_site_year <- noyo_july_plot_year %>%
+  group_by(year, plot_number) %>%
+  summarise(
+    across(
+      all_of(community_vars),
+      ~ weighted.mean(.x, w = n_locations)
+    ),
+    n_locations = sum(n_locations),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_community = rowSums(
+      across(all_of(community_vars))
+    )
+  )
+
+# Examine overall changes in the major grazer taxa
+
+noyo_site_year %>%
+  select(
+    plot_number,
+    year,
+    `purple_urchins_>2cm`,
+    red_urchins,
+    tegula
+  ) %>%
+  pivot_longer(
+    cols = c(
+      `purple_urchins_>2cm`,
+      red_urchins,
+      tegula
+    ),
+    names_to = "species",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  arrange(species, plot_number)
+```
+
+```{R}
+# Noyo: overall species changes across matched July locations
+
+noyo_site_species_changes <- noyo_site_year %>%
+  group_by(year) %>%
+  summarise(
+    across(
+      all_of(community_vars),
+      mean
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = all_of(community_vars),
+    names_to = "species",
+    values_to = "mean_abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = mean_abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  arrange(desc(abs(change)))
+
+noyo_site_species_changes %>%
+  print(n = Inf)
+```
+
+```{r}
+# Noyo: community turnover between July 2025 and 2026
+# Matched locations, grouped by 2026 plot number
+
+noyo_community_turnover <- noyo_site_year %>%
+  group_by(plot_number) %>%
+  group_modify(~ {
+
+    # Order the two community observations by year
+    plot_data <- .x %>%
+      arrange(year)
+
+    # Square-root transformed biological community
+    community_matrix <- plot_data %>%
+      select(all_of(community_vars)) %>%
+      as.matrix() %>%
+      sqrt()
+
+    # Bray-Curtis dissimilarity between years
+    tibble(
+      bray_curtis_change = as.numeric(
+        vegan::vegdist(
+          community_matrix,
+          method = "bray"
+        )
+      )
+    )
+  }) %>%
+  ungroup()
+
+# Examine turnover by plot and overall
+
+noyo_community_turnover
+
+noyo_community_turnover %>%
+  summarise(
+    n_plots = n(),
+    mean_turnover = mean(bray_curtis_change),
+    min_turnover = min(bray_curtis_change),
+    max_turnover = max(bray_curtis_change)
+  )
+```
+
+```{r}
+# Noyo: cross-year community turnover at matched physical locations
+
+noyo_location_turnover <- noyo_july_matched %>%
+  group_by(
+    physical_location_id,
+    treatment_year_2026
+  ) %>%
+  group_modify(~ {
+
+    location_data <- .x %>%
+      arrange(year)
+
+    community_matrix <- location_data %>%
+      select(all_of(community_vars)) %>%
+      as.matrix() %>%
+      sqrt()
+
+    tibble(
+      bray_curtis_change = as.numeric(
+        vegan::vegdist(
+          community_matrix,
+          method = "bray"
+        )
+      )
+    )
+  }) %>%
+  ungroup()
+
+# Summarize turnover by 2026 classification
+
+noyo_location_turnover %>%
+  group_by(treatment_year_2026) %>%
+  summarise(
+    n_locations = n(),
+    mean_turnover = mean(bray_curtis_change),
+    median_turnover = median(bray_curtis_change),
+    min_turnover = min(bray_curtis_change),
+    max_turnover = max(bray_curtis_change),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Noyo: community turnover by experimental plot and 2026 classification
+
+noyo_turnover_plot <- noyo_location_turnover %>%
+  left_join(
+    noyo_july_plot_structure %>%
+      distinct(physical_location_id, plot_number),
+    by = "physical_location_id",
+    relationship = "many-to-one"
+  )
+
+ggplot(
+  noyo_turnover_plot,
+  aes(
+    x = factor(plot_number),
+    y = bray_curtis_change,
+    color = treatment_year_2026
+  )
+) +
+  geom_point(
+    size = 3,
+    alpha = 0.85,
+    position = position_dodge(width = 0.4)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1)
+  ) +
+  labs(
+    title = "Noyo biological community turnover",
+    subtitle = "Matched physical locations, July 2025–2026",
+    x = "2026 experimental plot",
+    y = "Bray–Curtis dissimilarity",
+    color = "2026 classification"
+  ) +
+  theme_classic()
+```
+
+```{r}
+# Noyo: cross-year changes by biological community group
+
+noyo_group_changes <- noyo_site_year %>%
+  mutate(
+    grazer_total = rowSums(
+      pick(all_of(grazers))
+    ),
+    kelp_total = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    invert_total = rowSums(
+      pick(all_of(inverts))
+    )
+  ) %>%
+  select(
+    plot_number,
+    year,
+    grazer_total,
+    kelp_total,
+    invert_total
+  ) %>%
+  pivot_longer(
+    cols = c(
+      grazer_total,
+      kelp_total,
+      invert_total
+    ),
+    names_to = "community_group",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+# Summarize across the four matched plots
+
+noyo_group_changes %>%
+  group_by(community_group) %>%
+  summarise(
+    mean_2025 = mean(year_2025),
+    mean_2026 = mean(year_2026),
+    mean_change = mean(change),
+    plots_increased = sum(change > 0),
+    plots_decreased = sum(change < 0),
+    plots_unchanged = sum(change == 0),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Big River: cross-year changes by biological community group
+
+br_group_changes <- br_site_year %>%
+  mutate(
+    grazer_total = rowSums(
+      pick(all_of(grazers))
+    ),
+    kelp_total = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    invert_total = rowSums(
+      pick(all_of(inverts))
+    )
+  ) %>%
+  select(
+    plot_number,
+    year,
+    grazer_total,
+    kelp_total,
+    invert_total
+  ) %>%
+  pivot_longer(
+    cols = c(
+      grazer_total,
+      kelp_total,
+      invert_total
+    ),
+    names_to = "community_group",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+# Summarize across the seven matched plots
+
+br_group_changes %>%
+  group_by(community_group) %>%
+  summarise(
+    mean_2025 = mean(year_2025),
+    mean_2026 = mean(year_2026),
+    mean_change = mean(change),
+    plots_increased = sum(change > 0),
+    plots_decreased = sum(change < 0),
+    plots_unchanged = sum(change == 0),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Big River: exact paired tests for biological group totals
+
+br_group_tests <- br_group_changes %>%
+  group_by(community_group) %>%
+  summarise(
+    mean_change = mean(change),
+    median_change = median(change),
+
+    p_value = {
+      d <- change
+
+      signs <- as.matrix(
+        expand.grid(
+          rep(list(c(-1, 1)), length(d))
+        )
+      )
+
+      null_means <- as.vector(signs %*% d) / length(d)
+
+      mean(
+        abs(null_means) >= abs(mean(d)) - 1e-12
+      )
+    },
+
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adjusted = p.adjust(
+      p_value,
+      method = "BH"
+    )
+  ) %>%
+  arrange(p_adjusted)
+
+br_group_tests
+```
+
+```{r}
+# Big River: treatment differences in cross-year
+# changes for the three biological groups
+
+br_group_did <- br_cross_year_season %>%
+  mutate(
+    grazer_total = rowSums(pick(all_of(grazers))),
+    kelp_total = rowSums(pick(all_of(shared_kelp))),
+    invert_total = rowSums(pick(all_of(inverts)))
+  ) %>%
+  select(
+    plot_number, year, plot_type,
+    grazer_total, kelp_total, invert_total
+  ) %>%
+  pivot_longer(
+    cols = c(grazer_total, kelp_total, invert_total),
+    names_to = "community_group",
+    values_to = "abundance"
+  ) %>%
+  pivot_wider(
+    names_from = c(plot_type, year),
+    values_from = abundance,
+    names_glue = "{plot_type}_{year}"
+  ) %>%
+  mutate(
+    arkev_change = arkev_2026 - arkev_2025,
+    control_change = control_2026 - control_2025,
+    difference_in_changes = arkev_change - control_change
+  )
+
+# Exact paired permutation tests
+
+br_group_did_tests <- br_group_did %>%
+  group_by(community_group) %>%
+  summarise(
+    mean_arkev_change = mean(arkev_change),
+    mean_control_change = mean(control_change),
+    mean_difference = mean(difference_in_changes),
+
+    p_value = {
+      d <- difference_in_changes
+
+      signs <- as.matrix(
+        expand.grid(
+          rep(list(c(-1, 1)), length(d))
+        )
+      )
+
+      null_means <- as.vector(signs %*% d) / length(d)
+
+      mean(
+        abs(null_means) >= abs(mean(d)) - 1e-12
+      )
+    },
+
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adjusted = p.adjust(p_value, method = "BH")
+  )
+
+br_group_did_tests
+```
+
+```{r}
+# Big River: cross-year algal cover data availability
+
+br_cover_coverage <- community_cover_2025_2026 %>%
+  filter(
+    site == "big_river",
+    plot_number %in% 1:7,
+    lubridate::month(date) %in% c(5, 6, 8, 9)
+  ) %>%
+  mutate(
+    sampling_month = lubridate::month(date)
+  ) %>%
+  group_by(
+    year,
+    sampling_month,
+    plot_type
+  ) %>%
+  summarise(
+    n_surveys = n(),
+    n_algal_available = sum(!is.na(algal_cover)),
+    n_sand_available = sum(!is.na(SAND)),
+    n_fleshy_available = sum(!is.na(FLESHY)),
+    n_scum_available = sum(!is.na(SCUM)),
+    .groups = "drop"
+  ) %>%
+  arrange(year, sampling_month, plot_type)
+
+br_cover_coverage %>%
+  print(n = Inf)
+```
+
+```{r}
+# Big River: matched cross-year algal cover
+# Plots 1–7, May, June, August, September
+
+cover_vars <- c(
+  "CCA", "ACA", "ER", "BR", "turf",
+  "algal_cover", "FLESHY", "SCUM"
+)
+
+# Average cover across subplots within each sampling date
+br_cover_plot_date <- community_cover_2025_2026 %>%
+  filter(
+    site == "big_river",
+    plot_number %in% 1:7,
+    lubridate::month(date) %in% c(5, 6, 8, 9)
+  ) %>%
+  mutate(
+    sampling_month = lubridate::month(date)
+  ) %>%
+  group_by(
+    year,
+    sampling_month,
+    date,
+    plot_number,
+    plot_type
+  ) %>%
+  summarise(
+    across(all_of(cover_vars), mean),
+    n_subplots = n(),
+    .groups = "drop"
+  )
+
+# Average sampling dates within each month
+br_cover_plot_month <- br_cover_plot_date %>%
+  group_by(
+    year,
+    sampling_month,
+    plot_number,
+    plot_type
+  ) %>%
+  summarise(
+    across(all_of(cover_vars), mean),
+    n_dates = n(),
+    .groups = "drop"
+  )
+
+# Verify coverage and examine mean algal cover
+br_cover_plot_month %>%
+  group_by(year, plot_type) %>%
+  summarise(
+    n_plot_months = n(),
+    n_plots = n_distinct(plot_number),
+    mean_algal_cover = mean(algal_cover),
+    mean_fleshy_cover = mean(FLESHY),
+    mean_scum_cover = mean(SCUM),
+    n_missing_algal = sum(is.na(algal_cover)),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Big River: changes in individual algal-cover categories
+
+br_cover_components <- br_cover_plot_month %>%
+  group_by(year, plot_type) %>%
+  summarise(
+    across(
+      c(CCA, ACA, ER, BR, turf, algal_cover),
+      mean
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = c(CCA, ACA, ER, BR, turf, algal_cover),
+    names_to = "cover_type",
+    values_to = "mean_cover"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = mean_cover,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  arrange(plot_type, desc(abs(change)))
+
+br_cover_components %>%
+  print(n = Inf)
+```
+
+```{r}
+# Big River: relate changes in cover categories
+# to changes in kelp abundance
+
+# Average cover across the four shared months
+br_cover_season <- br_cover_plot_month %>%
+  group_by(
+    year,
+    plot_number,
+    plot_type
+  ) %>%
+  summarise(
+    across(
+      c(CCA, ACA, ER, BR, turf, FLESHY, SCUM),
+      mean
+    ),
+    .groups = "drop"
+  )
+
+# Join cover with kelp and grazer abundance
+br_cover_kelp <- br_cross_year_season %>%
+  mutate(
+    kelp_total = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    grazer_total = rowSums(
+      pick(all_of(grazers))
+    )
+  ) %>%
+  select(
+    year,
+    plot_number,
+    plot_type,
+    kelp_total,
+    grazer_total
+  ) %>%
+  left_join(
+    br_cover_season,
+    by = c("year", "plot_number", "plot_type"),
+    relationship = "one-to-one"
+  )
+
+# Calculate cross-year changes
+br_cover_kelp_changes <- br_cover_kelp %>%
+  pivot_wider(
+    names_from = year,
+    values_from = c(
+      kelp_total, grazer_total,
+      CCA, ACA, ER, BR, turf, FLESHY, SCUM
+    ),
+    names_glue = "{.value}_{year}"
+  ) %>%
+  mutate(
+    change_kelp_total = kelp_total_2026 - kelp_total_2025,
+    change_grazer_total = grazer_total_2026 - grazer_total_2025,
+    change_CCA = CCA_2026 - CCA_2025,
+    change_ACA = ACA_2026 - ACA_2025,
+    change_ER = ER_2026 - ER_2025,
+    change_BR = BR_2026 - BR_2025,
+    change_turf = turf_2026 - turf_2025,
+    change_FLESHY = FLESHY_2026 - FLESHY_2025,
+    change_SCUM = SCUM_2026 - SCUM_2025
+  )
+
+# Inspect paired changes
+br_cover_kelp_changes %>%
+  select(
+    plot_number,
+    plot_type,
+    change_kelp_total,
+    change_grazer_total,
+    change_CCA,
+    change_ACA,
+    change_ER,
+    change_BR,
+    change_turf,
+    change_FLESHY,
+    change_SCUM
+  ) %>%
+  arrange(plot_number, plot_type)
+```
+
+```{r}
+# Big River: paired treatment differences in changes
+# from 2025 to 2026
+
+br_paired_trends <- br_cover_kelp_changes %>%
+  select(
+    plot_number,
+    plot_type,
+    starts_with("change_")
+  ) %>%
+  pivot_longer(
+    cols = starts_with("change_"),
+    names_to = "variable",
+    values_to = "change"
+  ) %>%
+  mutate(
+    variable = sub("^change_", "", variable)
+  ) %>%
+  pivot_wider(
+    names_from = plot_type,
+    values_from = change
+  ) %>%
+  mutate(
+    arkev_minus_control = arkev - control
+  )
+
+# Summarize consistency across the 7 paired plots
+br_paired_trends_summary <- br_paired_trends %>%
+  group_by(variable) %>%
+  summarise(
+    mean_arkev_change = mean(arkev),
+    mean_control_change = mean(control),
+
+    mean_treatment_difference = mean(arkev_minus_control),
+
+    plots_arkev_higher = sum(arkev_minus_control > 0),
+    plots_control_higher = sum(arkev_minus_control < 0),
+    plots_equal = sum(arkev_minus_control == 0),
+
+    .groups = "drop"
+  ) %>%
+  arrange(variable)
+
+br_paired_trends_summary %>%
+  print(n = Inf, width = Inf)
+```
+
+```{r}
+# Big River: exact paired tests for treatment differences
+# in cross-year benthic cover changes
+
+cover_categories <- c(
+  "CCA", "ACA", "ER", "BR",
+  "turf", "FLESHY", "SCUM"
+)
+
+exact_paired_test <- function(x) {
+  x <- x[!is.na(x)]
+
+  signs <- as.matrix(
+    expand.grid(
+      rep(list(c(-1, 1)), length(x))
+    )
+  )
+
+  observed <- abs(mean(x))
+
+  permuted <- abs(
+    as.vector(signs %*% x) / length(x)
+  )
+
+  mean(permuted >= observed - 1e-10)
+}
+
+br_cover_treatment_tests <- br_paired_trends %>%
+  filter(variable %in% cover_categories) %>%
+  group_by(variable) %>%
+  summarise(
+    mean_arkev_change = mean(arkev),
+    mean_control_change = mean(control),
+
+    treatment_difference = mean(
+      arkev_minus_control
+    ),
+
+    n_pairs = n(),
+
+    p_value = exact_paired_test(
+      arkev_minus_control
+    ),
+
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adjusted = p.adjust(
+      p_value,
+      method = "BH"
+    )
+  ) %>%
+  arrange(p_value)
+
+br_cover_treatment_tests %>%
+  print(n = Inf)
+```
+
+```{r}
+# Convert mean observed abundance to density
+# Each subplot survey covers 3.14 m²
+
+survey_area_m2 <- 3.14
+
+# Big River interannual biology (Figure 3)
+br_biology_density <- br_biology_fig3 %>%
+  mutate(density = abundance / survey_area_m2)
+
+# Big River seasonal biology (Figure 8)
+br_seasonal_density <- br_seasonal_biology %>%
+  mutate(mean_density = mean_abundance / survey_area_m2)
+
+# Noyo interannual biology (Figure 4)
+# Uses the corrected 14 matched locations
+noyo_biology_density <- noyo_biology_fig4 %>%
+  mutate(density = abundance / survey_area_m2)
+
+# Noyo site-wide density summary
+noyo_density_summary <- noyo_reconciled_means %>%
+  mutate(
+    across(
+      c(year_2025, year_2026, change),
+      ~ .x / survey_area_m2
+    )
+  )
+
+noyo_density_summary %>%
+  print(n = Inf)
+```
+
+
+```{r}
+# Figure 1: Big River seasonal benthic cover
+# May, June, August, September in 2025 and 2026
+
+library(ggplot2)
+
+br_cover_fig1 <- br_cover_plot_month %>%
+  group_by(year, sampling_month, plot_type) %>%
+  summarise(
+    across(
+      c(CCA, ACA, ER, BR, turf),
+      mean,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = c(CCA, ACA, ER, BR, turf),
+    names_to = "cover_type",
+    values_to = "mean_cover"
+  ) %>%
+  mutate(
+    cover_type = factor(
+      cover_type,
+      levels = c("CCA", "BR", "ER", "turf", "ACA")
+    ),
+    year = factor(year),
+    plot_type = factor(
+      plot_type,
+      levels = c("arkev", "control"),
+      labels = c("ARKEV", "Control")
+    )
+  )
+
+ggplot(
+  br_cover_fig1,
+  aes(
+    x = sampling_month,
+    y = mean_cover,
+    color = plot_type,
+    group = plot_type
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  facet_grid(
+    cover_type ~ year,
+    scales = "free_y"
+  ) +
+  scale_x_continuous(
+    breaks = c(5, 6, 8, 9),
+    labels = c("May", "Jun", "Aug", "Sep")
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA)
+  ) +
+  labs(
+    title = "Seasonal benthic cover at Big River",
+    subtitle = "Mean cover across seven matched experimental plots",
+    x = "Sampling month",
+    y = "Mean cover (%)",
+    color = "Treatment"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    strip.background = element_rect(
+      fill = "grey95"
+    ),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+```
+
+```{r}
+# Figure 8: Big River seasonal biological density trends
+# Improved facet labels and readability
+
+br_seasonal_plot_density <- ggplot(
+  br_seasonal_density,
+  aes(
+    x = sampling_month,
+    y = mean_density,
+    color = plot_type,
+    group = plot_type
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  facet_grid(
+    variable ~ year,
+    scales = "free_y",
+    switch = "y"
+  ) +
+  scale_x_continuous(
+    breaks = c(5, 6, 8, 9),
+    labels = c("May", "Jun", "Aug", "Sep")
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA)
+  ) +
+  labs(
+    title = "Seasonal biological density trends at Big River",
+    subtitle = "Mean density across seven matched experimental plots",
+    x = "Sampling month",
+    y = expression("Mean density (individuals/m"^2*")"),
+    color = "Treatment"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    strip.placement = "outside",
+    strip.text.y.left = element_text(
+      angle = 0,
+      face = "bold",
+      size = 10
+    ),
+    strip.text.x = element_text(
+      face = "bold",
+      size = 11
+    ),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+br_seasonal_plot_density
+```
+
+```{r}
+# Figure 2: Big River paired changes in CCA and BR
+
+br_cover_fig2 <- br_paired_trends %>%
+  filter(variable %in% c("CCA", "BR")) %>%
+  select(
+    plot_number,
+    variable,
+    arkev,
+    control
+  ) %>%
+  pivot_longer(
+    cols = c(arkev, control),
+    names_to = "treatment",
+    values_to = "cover_change"
+  ) %>%
+  mutate(
+    variable = factor(
+      variable,
+      levels = c("CCA", "BR"),
+      labels = c("CCA", "Bare rock")
+    ),
+    treatment = factor(
+      treatment,
+      levels = c("arkev", "control"),
+      labels = c("ARKEV", "Control")
+    )
+  )
+
+ggplot(
+  br_cover_fig2,
+  aes(
+    x = treatment,
+    y = cover_change
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_line(
+    aes(group = plot_number),
+    color = "grey70",
+    linewidth = 0.6
+  ) +
+  geom_point(
+    aes(color = treatment),
+    size = 2.5,
+    alpha = 0.75
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 18,
+    size = 5,
+    color = "black"
+  ) +
+  facet_wrap(
+    ~ variable,
+    scales = "free_y"
+  ) +
+  labs(
+    title = "Changes in benthic cover at Big River",
+    subtitle = paste(
+      "2025–2026 changes across seven",
+      "matched experimental plots"
+    ),
+    x = "Treatment",
+    y = "Change in cover (percentage points)",
+    color = "Treatment",
+    caption = paste(
+      "Grey lines connect paired treatments",
+      "within experimental plots.",
+      "Black diamonds indicate treatment means."
+    )
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  )
+
+br_cover_fig2
+```
+
+```{r}
+# Figure 3: Big River cross-year biological density
+# Seven matched experimental plots
+
+br_biology_plot_density <- ggplot(
+  br_biology_density,
+  aes(
+    x = year,
+    y = density,
+    color = plot_type
+  )
+) +
+  geom_line(
+    aes(
+      group = interaction(plot_number, plot_type)
+    ),
+    alpha = 0.3,
+    linewidth = 0.6
+  ) +
+  geom_point(
+    alpha = 0.45,
+    size = 1.8
+  ) +
+  stat_summary(
+    aes(group = plot_type),
+    fun = mean,
+    geom = "line",
+    linewidth = 1.4
+  ) +
+  stat_summary(
+    aes(group = plot_type),
+    fun = mean,
+    geom = "point",
+    size = 3.5
+  ) +
+  facet_wrap(
+    ~ variable,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  labs(
+    title = "Changes in kelp and grazer density at Big River",
+    subtitle = "2025–2026, seven matched experimental plots",
+    x = "Year",
+    y = expression("Mean density (individuals/m"^2*")"),
+    color = "Treatment"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+br_biology_plot_density
+```
+
+```{r}
+# Figure 6: Big River cross-year biological community PCoA
+
+library(vegan)
+library(ggplot2)
+library(dplyr)
+
+# Community matrix
+br_pcoa_comm <- br_cross_year_season %>%
+  select(all_of(community_vars)) %>%
+  as.matrix()
+
+# Check that all observations have valid community data
+stopifnot(
+  !anyNA(br_pcoa_comm),
+  all(rowSums(br_pcoa_comm) > 0)
+)
+
+# Square-root transformation and Bray-Curtis distance
+br_pcoa_dist <- vegdist(
+  sqrt(br_pcoa_comm),
+  method = "bray"
+)
+
+# Principal coordinates analysis
+# Additive correction for non-Euclidean distances
+br_pcoa <- cmdscale(
+  br_pcoa_dist,
+  k = 2,
+  eig = TRUE,
+  add = TRUE
+)
+
+# Percentage of positive eigenvalue variation
+positive_eig <- br_pcoa$eig[br_pcoa$eig > 0]
+
+axis_variation <- 100 *
+  br_pcoa$eig[1:2] /
+  sum(positive_eig)
+
+# Attach coordinates to sampling information
+br_pcoa_scores <- br_cross_year_season %>%
+  select(
+    year,
+    plot_number,
+    plot_type
+  ) %>%
+  mutate(
+    PCoA1 = br_pcoa$points[, 1],
+    PCoA2 = br_pcoa$points[, 2],
+    year = factor(year),
+    plot_type = factor(
+      plot_type,
+      levels = c("arkev", "control"),
+      labels = c("ARKEV", "Control")
+    )
+  )
+
+# Plot matched trajectories
+ggplot(
+  br_pcoa_scores,
+  aes(
+    x = PCoA1,
+    y = PCoA2
+  )
+) +
+  geom_line(
+    aes(
+      group = interaction(plot_number, plot_type),
+      color = plot_type
+    ),
+    alpha = 0.45,
+    linewidth = 0.7
+  ) +
+  geom_point(
+    aes(
+      color = plot_type,
+      shape = year
+    ),
+    size = 3,
+    alpha = 0.9
+  ) +
+  scale_shape_manual(
+    values = c("2025" = 16, "2026" = 17)
+  ) +
+  coord_equal() +
+  labs(
+    title = "Biological community changes at Big River",
+    subtitle = paste(
+      "PCoA of square-root-transformed",
+      "Bray-Curtis dissimilarity"
+    ),
+    x = paste0(
+      "PCoA 1 (",
+      round(axis_variation[1], 1),
+      "%)"
+    ),
+    y = paste0(
+      "PCoA 2 (",
+      round(axis_variation[2], 1),
+      "%)"
+    ),
+    color = "Treatment",
+    shape = "Year",
+    caption = paste(
+      "Lines connect the same plot-treatment",
+      "combination across years."
+    )
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "right"
+  )
+```
+
+
+
+
+```{r}
+# Noyo: cross-year benthic cover trends
+# at physically matched July survey locations
+
+noyo_matched_cover <- community_cover_2025_2026 %>%
+  filter(
+    site == "noyo",
+    year %in% c(2025, 2026),
+    lubridate::month(date) == 7
+  ) %>%
+  semi_join(
+    noyo_july_matched %>%
+      distinct(physical_location_id),
+    by = "physical_location_id"
+  ) %>%
+  group_by(
+    year,
+    physical_location_id
+  ) %>%
+  summarise(
+    across(
+      c(CCA, ACA, ER, BR, turf, FLESHY, SCUM),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  )
+
+# Check matched sample sizes
+noyo_matched_cover %>%
+  count(year, name = "n_locations") %>%
+  print()
+
+# Calculate mean cover changes
+noyo_cover_changes <- noyo_matched_cover %>%
+  group_by(year) %>%
+  summarise(
+    across(
+      c(CCA, ACA, ER, BR, turf, FLESHY, SCUM),
+      mean
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = -year,
+    names_to = "cover_type",
+    values_to = "mean_cover"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = mean_cover,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  arrange(desc(abs(change)))
+
+noyo_cover_changes %>%
+  print(n = Inf)
+```
+
+```{r}
+# Noyo: consistency of benthic cover changes
+# across the 14 matched July locations
+
+noyo_cover_paired_changes <- noyo_matched_cover %>%
+  pivot_wider(
+    id_cols = physical_location_id,
+    names_from = year,
+    values_from = c(
+      CCA, ACA, ER, BR, turf, FLESHY, SCUM
+    ),
+    names_glue = "{.value}_{year}"
+  ) %>%
+  pivot_longer(
+    cols = -physical_location_id,
+    names_to = c("cover_type", "year"),
+    names_pattern = "^(.*)_(2025|2026)$",
+    values_to = "cover"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = cover,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+noyo_cover_consistency <- noyo_cover_paired_changes %>%
+  group_by(cover_type) %>%
+  summarise(
+    n_locations = n(),
+    mean_change = mean(change),
+    median_change = median(change),
+
+    locations_increased = sum(change > 0),
+    locations_decreased = sum(change < 0),
+    locations_unchanged = sum(change == 0),
+
+    .groups = "drop"
+  ) %>%
+  arrange(desc(abs(mean_change)))
+
+noyo_cover_consistency %>%
+  print(n = Inf)
+```
+
+```{r}
+# Noyo: cross-year cover changes by 2026
+# ARKEV/control location classification
+
+noyo_2026_groups <- community_cover_2025_2026 %>%
+  filter(
+    site == "noyo",
+    year == 2026,
+    lubridate::month(date) == 7
+  ) %>%
+  distinct(
+    physical_location_id,
+    plot_type
+  ) %>%
+  rename(
+    treatment_2026 = plot_type
+  )
+
+noyo_cover_by_treatment <- noyo_cover_paired_changes %>%
+  left_join(
+    noyo_2026_groups,
+    by = "physical_location_id",
+    relationship = "many-to-one"
+  ) %>%
+  group_by(treatment_2026, cover_type) %>%
+  summarise(
+    n_locations = n(),
+    mean_2025 = mean(year_2025),
+    mean_2026 = mean(year_2026),
+    mean_change = mean(change),
+    locations_increased = sum(change > 0),
+    locations_decreased = sum(change < 0),
+    .groups = "drop"
+  ) %>%
+  arrange(cover_type, treatment_2026)
+
+noyo_cover_by_treatment %>%
+  print(n = Inf, width = Inf)
+```
+
+```{r}
+# Noyo: matched July biological changes
+# grouped by 2026 treatment classification
+
+noyo_biology_by_treatment <- community_cover_2025_2026 %>%
+  filter(
+    site == "noyo",
+    year %in% c(2025, 2026),
+    lubridate::month(date) == 7
+  ) %>%
+  semi_join(
+    noyo_2026_groups,
+    by = "physical_location_id"
+  ) %>%
+  mutate(
+    kelp_total = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    grazer_total = rowSums(
+      pick(all_of(grazers))
+    )
+  ) %>%
+  group_by(year, physical_location_id) %>%
+  summarise(
+    across(
+      c(
+        kelp_total,
+        grazer_total,
+        `purple_urchins_<2cm`,
+        `purple_urchins_>2cm`,
+        red_urchins,
+        tegula
+      ),
+      mean
+    ),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    noyo_2026_groups,
+    by = "physical_location_id",
+    relationship = "many-to-one"
+  ) %>%
+  group_by(treatment_2026, year) %>%
+  summarise(
+    n_locations = n(),
+    across(
+      c(
+        kelp_total,
+        grazer_total,
+        `purple_urchins_<2cm`,
+        `purple_urchins_>2cm`,
+        red_urchins,
+        tegula
+      ),
+      mean
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = -c(treatment_2026, year, n_locations),
+    names_to = "variable",
+    values_to = "mean_abundance"
+  ) %>%
+  select(-n_locations) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = mean_abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  ) %>%
+  arrange(variable, treatment_2026)
+
+noyo_biology_by_treatment %>%
+  print(n = Inf, width = Inf)
+```
+
+```{r}
+# Figure 4: Noyo biological density changes
+# 14 matched physical locations, July 2025–2026
+
+noyo_biology_plot_density <- ggplot(
+  noyo_biology_density,
+  aes(
+    x = year,
+    y = density,
+    color = treatment_2026
+  )
+) +
+  geom_line(
+    aes(group = physical_location_id),
+    alpha = 0.3,
+    linewidth = 0.6
+  ) +
+  geom_point(
+    alpha = 0.45,
+    size = 1.8
+  ) +
+  stat_summary(
+    aes(group = treatment_2026),
+    fun = mean,
+    geom = "line",
+    linewidth = 1.4
+  ) +
+  stat_summary(
+    aes(group = treatment_2026),
+    fun = mean,
+    geom = "point",
+    size = 3.5
+  ) +
+  facet_wrap(
+    ~ variable,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  labs(
+    title = "Changes in kelp and grazer density at Noyo",
+    subtitle = "July 2025–2026, 14 matched physical locations",
+    x = "Year",
+    y = expression("Mean density (individuals/m"^2*")"),
+    color = "2026 designation"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+noyo_biology_plot_density
+```
+
+```{r}
+# Figure 5: Noyo benthic cover changes
+# July 2025–2026, 14 matched physical locations
+
+noyo_cover_fig5 <- noyo_matched_cover %>%
+  left_join(
+    noyo_2026_groups,
+    by = "physical_location_id",
+    relationship = "many-to-one"
+  ) %>%
+  pivot_longer(
+    cols = c(CCA, ER, BR, turf, FLESHY),
+    names_to = "cover_type",
+    values_to = "cover"
+  ) %>%
+  mutate(
+    year = factor(year),
+    treatment_2026 = factor(
+      treatment_2026,
+      levels = c("arkev", "control"),
+      labels = c("ARKEV", "Control")
+    ),
+    cover_type = factor(
+      cover_type,
+      levels = c("CCA", "ER", "BR", "turf", "FLESHY"),
+      labels = c(
+        "CCA", "Encrusting red algae",
+        "Bare rock", "Turf", "Fleshy algae"
+      )
+    )
+  )
+
+ggplot(
+  noyo_cover_fig5,
+  aes(
+    x = year,
+    y = cover,
+    color = treatment_2026
+  )
+) +
+  geom_line(
+    aes(group = physical_location_id),
+    alpha = 0.3,
+    linewidth = 0.6
+  ) +
+  geom_point(
+    alpha = 0.45,
+    size = 1.8
+  ) +
+  stat_summary(
+    aes(group = treatment_2026),
+    fun = mean,
+    geom = "line",
+    linewidth = 1.4
+  ) +
+  stat_summary(
+    aes(group = treatment_2026),
+    fun = mean,
+    geom = "point",
+    size = 3.5
+  ) +
+  facet_wrap(
+    ~ cover_type,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  labs(
+    title = "Changes in benthic cover at Noyo",
+    subtitle = "July 2025–2026, 14 matched physical locations",
+    x = "Year",
+    y = "Mean cover (%)",
+    color = "2026 designation"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    plot.caption = element_text(
+      size = 9,
+      hjust = 0
+    )
+  )
+
+noyo_cover_fig5
+```
+
+```{r}
+# Figure 7: Noyo cross-year biological community PCoA
+# July 2025–2026, 14 matched physical locations
+
+noyo_pcoa_data <- community_cover_2025_2026 %>%
+  filter(
+    site == "noyo",
+    year %in% c(2025, 2026),
+    lubridate::month(date) == 7
+  ) %>%
+  semi_join(
+    noyo_july_matched %>%
+      distinct(physical_location_id),
+    by = "physical_location_id"
+  ) %>%
+  group_by(year, physical_location_id) %>%
+  summarise(
+    across(all_of(community_vars), mean),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    noyo_2026_groups,
+    by = "physical_location_id",
+    relationship = "many-to-one"
+  ) %>%
+  arrange(physical_location_id, year)
+
+# Check the 14 matched locations are present in both years
+stopifnot(
+  nrow(noyo_pcoa_data) == 28,
+  n_distinct(noyo_pcoa_data$physical_location_id) == 14
+)
+
+# Community matrix
+noyo_pcoa_comm <- noyo_pcoa_data %>%
+  select(all_of(community_vars)) %>%
+  as.matrix()
+
+# Bray-Curtis requires special care for all-zero communities
+stopifnot(
+  !anyNA(noyo_pcoa_comm),
+  all(rowSums(noyo_pcoa_comm) > 0)
+)
+
+# Square-root-transformed Bray-Curtis
+noyo_pcoa_dist <- vegan::vegdist(
+  sqrt(noyo_pcoa_comm),
+  method = "bray"
+)
+
+# Principal coordinates analysis
+noyo_pcoa <- cmdscale(
+  noyo_pcoa_dist,
+  k = 2,
+  eig = TRUE,
+  add = TRUE
+)
+
+positive_eig <- noyo_pcoa$eig[noyo_pcoa$eig > 0]
+
+noyo_axis_variation <- 100 *
+  noyo_pcoa$eig[1:2] /
+  sum(positive_eig)
+
+# Extract coordinates
+noyo_pcoa_scores <- noyo_pcoa_data %>%
+  select(
+    year,
+    physical_location_id,
+    treatment_2026
+  ) %>%
+  mutate(
+    PCoA1 = noyo_pcoa$points[, 1],
+    PCoA2 = noyo_pcoa$points[, 2],
+    year = factor(year),
+    treatment_2026 = factor(
+      treatment_2026,
+      levels = c("arkev", "control"),
+      labels = c("ARKEV", "Control")
+    )
+  )
+
+# Plot paired community trajectories
+ggplot(
+  noyo_pcoa_scores,
+  aes(x = PCoA1, y = PCoA2)
+) +
+  geom_line(
+    aes(
+      group = physical_location_id,
+      color = treatment_2026
+    ),
+    alpha = 0.45,
+    linewidth = 0.7
+  ) +
+  geom_point(
+    aes(
+      color = treatment_2026,
+      shape = year
+    ),
+    size = 3,
+    alpha = 0.9
+  ) +
+  scale_shape_manual(
+    values = c("2025" = 16, "2026" = 17)
+  ) +
+  coord_equal() +
+  labs(
+    title = "Biological community changes at Noyo",
+    subtitle = paste(
+      "PCoA of square-root-transformed",
+      "Bray-Curtis dissimilarity"
+    ),
+    x = paste0(
+      "PCoA 1 (",
+      round(noyo_axis_variation[1], 1),
+      "%)"
+    ),
+    y = paste0(
+      "PCoA 2 (",
+      round(noyo_axis_variation[2], 1),
+      "%)"
+    ),
+    color = "2026 designation",
+    shape = "Year",
+    caption = paste(
+      "Lines connect matched physical locations.",
+      "Groups use 2026 treatment classifications."
+    )
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "right"
+  )
+```
+
+```{r}
+# Correct Noyo Figure 4:
+# retain only the 14 physically matched locations
+
+noyo_biology_fig4 <- noyo_biology_fig4 %>%
+  semi_join(
+    noyo_july_matched %>%
+      distinct(physical_location_id),
+    by = "physical_location_id"
+  )
+
+# Verify the number of matched locations
+noyo_biology_fig4 %>%
+  group_by(year) %>%
+  summarise(
+    n_locations = n_distinct(physical_location_id),
+    .groups = "drop"
+  ) %>%
+  print()
+
+# Recalculate site-wide biological means
+noyo_reconciled_means <- noyo_biology_fig4 %>%
+  group_by(year, variable) %>%
+  summarise(
+    mean_abundance = mean(abundance),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = mean_abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+noyo_reconciled_means %>%
+  print(n = Inf, width = Inf)
+```
+
+```{r}
+# Corrected Noyo biological trends by 2026 designation
+
+noyo_biology_by_treatment <- noyo_biology_fig4 %>%
+  group_by(treatment_2026, variable, year) %>%
+  summarise(
+    n_locations = n_distinct(physical_location_id),
+    mean_abundance = mean(abundance),
+    .groups = "drop"
+  ) %>%
+  select(-n_locations) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = mean_abundance,
+    names_prefix = "year_"
+  ) %>%
+  mutate(
+    change = year_2026 - year_2025
+  )
+
+noyo_biology_by_treatment %>%
+  print(n = Inf, width = Inf)
+
+# Regenerate Figure 4 with only matched locations
+
+noyo_biology_plot_corrected <- ggplot(
+  noyo_biology_fig4,
+  aes(
+    x = year,
+    y = abundance,
+    color = treatment_2026
+  )
+) +
+  geom_line(
+    aes(group = physical_location_id),
+    alpha = 0.3,
+    linewidth = 0.6
+  ) +
+  geom_point(
+    alpha = 0.45,
+    size = 1.8
+  ) +
+  stat_summary(
+    aes(group = treatment_2026),
+    fun = mean,
+    geom = "line",
+    linewidth = 1.4
+  ) +
+  stat_summary(
+    aes(group = treatment_2026),
+    fun = mean,
+    geom = "point",
+    size = 3.5
+  ) +
+  facet_wrap(
+    ~ variable,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  labs(
+    title = "Changes in kelp and grazer abundance at Noyo",
+    subtitle = "July 2025–2026, 14 matched physical locations",
+    x = "Year",
+    y = "Mean observed abundance",
+    color = "2026 designation",
+    caption = "Thin lines: matched locations; thick lines: group means."
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+noyo_biology_plot_corrected
+```
+
+
+
+```{r}
+#got too in weeds here,  Relationships between benthic habitat, grazers, and kelp
+# Big River: within-year associations between
+# benthic cover, grazing, and kelp abundance
+
+br_cover_kelp_correlations <- br_cover_kelp %>%
+  select(
+    year,
+    plot_number,
+    plot_type,
+    kelp_total,
+    grazer_total,
+    CCA, ACA, ER, BR, turf, FLESHY, SCUM
+  ) %>%
+  pivot_longer(
+    cols = c(
+      grazer_total,
+      CCA, ACA, ER, BR, turf, FLESHY, SCUM
+    ),
+    names_to = "predictor",
+    values_to = "predictor_value"
+  ) %>%
+  group_by(year, predictor) %>%
+  summarise(
+    n = sum(
+      complete.cases(kelp_total, predictor_value)
+    ),
+    spearman_rho = if (
+      n_distinct(predictor_value, na.rm = TRUE) > 1 &&
+      n_distinct(kelp_total, na.rm = TRUE) > 1
+    ) {
+      cor(
+        kelp_total,
+        predictor_value,
+        method = "spearman",
+        use = "complete.obs"
+      )
+    } else {
+      NA_real_
+    },
+    .groups = "drop"
+  ) %>%
+  arrange(predictor, year)
+
+br_cover_kelp_correlations
+```
+
+```{r}
+# Big River: monthly relationships among
+# benthic cover, grazers, and kelp
+
+br_monthly_cover_kelp <- br_cross_year %>%
+  mutate(
+    kelp_total = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    grazer_total = rowSums(
+      pick(all_of(grazers))
+    )
+  ) %>%
+  select(
+    year,
+    sampling_month,
+    plot_number,
+    plot_type,
+    kelp_total,
+    grazer_total
+  ) %>%
+  left_join(
+    br_cover_plot_month %>%
+      select(
+        year,
+        sampling_month,
+        plot_number,
+        plot_type,
+        CCA, ACA, ER, BR, turf,
+        FLESHY, SCUM
+      ),
+    by = c(
+      "year",
+      "sampling_month",
+      "plot_number",
+      "plot_type"
+    ),
+    relationship = "one-to-one"
+  )
+
+# Examine kelp occurrence and sampling coverage
+
+br_monthly_cover_kelp %>%
+  group_by(year, sampling_month) %>%
+  summarise(
+    n_observations = n(),
+    n_kelp_present = sum(kelp_total > 0),
+    mean_kelp = mean(kelp_total),
+    median_kelp = median(kelp_total),
+    mean_grazers = mean(grazer_total),
+    n_missing_cover = sum(is.na(CCA)),
+    .groups = "drop"
+  ) %>%
+  arrange(year, sampling_month)
+```
+
+```{r}
+# Big River: monthly trends in individual cover categories
+
+br_monthly_cover_trends <- br_monthly_cover_kelp %>%
+  group_by(year, sampling_month) %>%
+  summarise(
+    mean_kelp = mean(kelp_total),
+    kelp_occurrence = mean(kelp_total > 0) * 100,
+
+    mean_CCA = mean(CCA),
+    mean_ACA = mean(ACA),
+    mean_ER = mean(ER),
+    mean_BR = mean(BR),
+    mean_turf = mean(turf),
+
+    mean_FLESHY = mean(FLESHY),
+    mean_SCUM = mean(SCUM),
+
+    mean_grazers = mean(grazer_total),
+
+    .groups = "drop"
+  ) %>%
+  arrange(year, sampling_month)
+
+br_monthly_cover_trends %>%
+  print(n = Inf)
+```
+
+```{r}
+# Big River: May 2026 habitat conditions
+# associated with kelp presence
+
+br_may26_kelp_habitat <- br_monthly_cover_kelp %>%
+  filter(
+    year == 2026,
+    sampling_month == 5
+  ) %>%
+  mutate(
+    kelp_present = kelp_total > 0
+  ) %>%
+  group_by(kelp_present) %>%
+  summarise(
+    n_plot_treatments = n(),
+
+    mean_kelp = mean(kelp_total),
+
+    mean_CCA = mean(CCA),
+    mean_ACA = mean(ACA),
+    mean_ER = mean(ER),
+    mean_BR = mean(BR),
+    mean_turf = mean(turf),
+
+    mean_FLESHY = mean(FLESHY),
+    mean_SCUM = mean(SCUM),
+
+    mean_grazers = mean(grazer_total),
+
+    .groups = "drop"
+  )
+
+br_may26_kelp_habitat
+```
+
+```{r}
+# Big River: May 2026 grazer abundances
+# in plots with and without kelp
+
+br_may26_grazers <- br_cross_year %>%
+  filter(
+    year == 2026,
+    sampling_month == 5
+  ) %>%
+  mutate(
+    kelp_total = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    kelp_present = kelp_total > 0
+  ) %>%
+  group_by(kelp_present) %>%
+  summarise(
+    n_plot_treatments = n(),
+
+    across(
+      all_of(grazers),
+      mean
+    ),
+
+    .groups = "drop"
+  )
+
+br_may26_grazers %>%
+  select(-n_plot_treatments) %>%
+  pivot_longer(
+    cols = all_of(grazers),
+    names_to = "grazer",
+    values_to = "mean_abundance"
+  ) %>%
+  pivot_wider(
+    names_from = kelp_present,
+    values_from = mean_abundance,
+    names_prefix = "kelp_present_"
+  ) %>%
+  mutate(
+    difference =
+      kelp_present_TRUE - kelp_present_FALSE
+  ) %>%
+  arrange(desc(abs(difference)))
+```
+
+```{r}
+# Big River: monthly purple urchin abundance
+# according to kelp presence
+
+br_monthly_urchin_kelp <- br_cross_year %>%
+  mutate(
+    kelp_total = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    kelp_present = kelp_total > 0
+  ) %>%
+  group_by(
+    year,
+    sampling_month,
+    kelp_present
+  ) %>%
+  summarise(
+    n_plot_treatments = n(),
+
+    mean_small_purple = mean(
+      `purple_urchins_<2cm`
+    ),
+
+    mean_large_purple = mean(
+      `purple_urchins_>2cm`
+    ),
+
+    mean_red_urchins = mean(
+      red_urchins
+    ),
+
+    mean_tegula = mean(
+      tegula
+    ),
+
+    .groups = "drop"
+  ) %>%
+  arrange(
+    year,
+    sampling_month,
+    kelp_present
+  )
+
+br_monthly_urchin_kelp %>%
+  print(n = Inf)
+```
+
+```{r}
+# Big River: habitat and urchin conditions
+# in months with both kelp-present and kelp-absent observations
+
+br_habitat_urchin_comparison <- br_cross_year %>%
+  filter(
+    (year == 2025 & sampling_month == 8) |
+    (year == 2026 & sampling_month == 5)
+  ) %>%
+  mutate(
+    kelp_total = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    kelp_present = kelp_total > 0
+  ) %>%
+  select(
+    year,
+    sampling_month,
+    plot_number,
+    plot_type,
+    kelp_present,
+    `purple_urchins_<2cm`,
+    `purple_urchins_>2cm`
+  ) %>%
+  left_join(
+    br_cover_plot_month %>%
+      select(
+        year, sampling_month,
+        plot_number, plot_type,
+        CCA, ACA, ER, BR, turf, FLESHY
+      ),
+    by = c(
+      "year", "sampling_month",
+      "plot_number", "plot_type"
+    ),
+    relationship = "one-to-one"
+  ) %>%
+  group_by(year, sampling_month, kelp_present) %>%
+  summarise(
+    n = n(),
+    mean_small_purple = mean(`purple_urchins_<2cm`),
+    mean_large_purple = mean(`purple_urchins_>2cm`),
+    mean_CCA = mean(CCA),
+    mean_ACA = mean(ACA),
+    mean_ER = mean(ER),
+    mean_BR = mean(BR),
+    mean_turf = mean(turf),
+    mean_FLESHY = mean(FLESHY),
+    .groups = "drop"
+  )
+
+br_habitat_urchin_comparison %>%
+  print(n = Inf, width = Inf)
+```
+
+```{r}
+# Big River 2025:
+# Did May habitat and grazers differ between
+# locations that retained versus lost kelp by August?
+
+br_2025_may_aug <- br_monthly_cover_kelp %>%
+  filter(
+    year == 2025,
+    sampling_month == 5
+  ) %>%
+  transmute(
+    plot_number,
+    plot_type,
+    may_kelp = kelp_total,
+    may_CCA = CCA,
+    may_ACA = ACA,
+    may_ER = ER,
+    may_BR = BR,
+    may_turf = turf,
+    may_FLESHY = FLESHY,
+    may_grazers = grazer_total
+  ) %>%
+  left_join(
+    br_cross_year %>%
+      filter(
+        year == 2025,
+        sampling_month == 5
+      ) %>%
+      transmute(
+        plot_number,
+        plot_type,
+        may_small_purple = `purple_urchins_<2cm`,
+        may_large_purple = `purple_urchins_>2cm`
+      ),
+    by = c("plot_number", "plot_type"),
+    relationship = "one-to-one"
+  ) %>%
+  left_join(
+    br_monthly_cover_kelp %>%
+      filter(
+        year == 2025,
+        sampling_month == 8
+      ) %>%
+      transmute(
+        plot_number,
+        plot_type,
+        august_kelp = kelp_total,
+        kelp_retained = kelp_total > 0
+      ),
+    by = c("plot_number", "plot_type"),
+    relationship = "one-to-one"
+  )
+
+# Compare May conditions by August kelp status
+br_2025_may_aug %>%
+  group_by(kelp_retained) %>%
+  summarise(
+    n = n(),
+
+    may_kelp = mean(may_kelp),
+
+    small_purple = mean(may_small_purple),
+    large_purple = mean(may_large_purple),
+
+    CCA = mean(may_CCA),
+    ACA = mean(may_ACA),
+    ER = mean(may_ER),
+    BR = mean(may_BR),
+    turf = mean(may_turf),
+    FLESHY = mean(may_FLESHY),
+
+    .groups = "drop"
+  ) %>%
+  print(width = Inf)
+```
+
+```{r}
+# Big River 2025: inspect May conditions and
+# August kelp presence for each paired treatment
+
+br_2025_may_aug %>%
+  select(
+    plot_number,
+    plot_type,
+    may_kelp,
+    august_kelp,
+    kelp_retained,
+    may_small_purple,
+    may_large_purple,
+    may_CCA,
+    may_ACA,
+    may_BR,
+    may_turf
+  ) %>%
+  arrange(plot_number, plot_type) %>%
+  print(n = Inf, width = Inf)
+```
+
+```{r}
+# Big River 2025: check sampling effort and
+# matching physical subplots between May and August
+
+br_2025_sampling_overlap <- community_cover_2025_2026 %>%
+  filter(
+    site == "big_river",
+    year == 2025
+  ) %>%
+  mutate(
+    sampling_month = lubridate::month(date)
+  ) %>%
+  filter(sampling_month %in% c(5, 8),
+         plot_number %in% 1:7) %>%
+  group_by(plot_number, plot_type) %>%
+  summarise(
+    may_locations = n_distinct(
+      physical_location_id[sampling_month == 5]
+    ),
+    august_locations = n_distinct(
+      physical_location_id[sampling_month == 8]
+    ),
+    locations_in_both = length(
+      intersect(
+        physical_location_id[sampling_month == 5],
+        physical_location_id[sampling_month == 8]
+      )
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(plot_number, plot_type)
+
+br_2025_sampling_overlap %>%
+  print(n = Inf)
+```
+
+```{r}
+#urchin density over time
+library(tidyverse)
+library(lubridate)
+
+# Prepare 2025 purple urchin surveys
+urchins_2025 <- surveys_2025 %>%
+  filter(
+    tolower(data_type) == "urchins"
+  ) %>%
+  group_by(survey_id) %>%
+  filter(
+    !any(is.na(count_num))
+  ) %>%
+  mutate(
+    species_code = toupper(trimws(species_code)),
+    size_cm = trimws(as.character(size_cm))
+  ) %>%
+  summarise(
+    year = 2025,
+    date = first(as.Date(date)),
+    site = first(site),
+    arkev_unit = first(arkev_unit),
+
+    small_purple = sum(
+      count_num[
+        species_code == "STRPUR" &
+        size_cm == "<2cm"
+      ]
+    ),
+
+    large_purple = sum(
+      count_num[
+        species_code == "STRPUR" &
+        size_cm == ">2cm"
+      ]
+    ),
+
+    .groups = "drop"
+  )
+```
+
+```{r}
+#Prepare 2026 purple urchin surveys
+
+urchins_2026 <- ki %>%
+  transmute(
+    year = 2026,
+    date = as.Date(date),
+    site,
+    arkev_unit,
+
+    small_purple = purrr::map_dbl(
+      `purple_urchins_<2cm`,
+      ~ as.numeric(unlist(.x))[1]
+    ),
+
+    large_purple = purrr::map_dbl(
+      `purple_urchins_>2cm`,
+      ~ as.numeric(unlist(.x))[1]
+    )
+  ) %>%
+  filter(
+    !is.na(small_purple),
+    !is.na(large_purple)
+  )
+```
+
+```{r}
+# Combine all valid 2025–2026 surveys
+
+urchin_all <- bind_rows(
+  urchins_2025,
+  urchins_2026
+) %>%
+  mutate(
+    site = str_replace_all(
+      tolower(trimws(site)), " ", "_"
+    ),
+    plot_number = as.integer(
+      str_extract(arkev_unit, "^\\d+")
+    ),
+    block_id = paste(site, plot_number, sep = "."),
+    month_date = floor_date(date, "month")
+  ) %>%
+  filter(
+    site %in% c("big_river", "noyo"),
+    !is.na(plot_number)
+  ) %>%
+  pivot_longer(
+    cols = c(small_purple, large_purple),
+    names_to = "size_class",
+    values_to = "count"
+  ) %>%
+  mutate(
+    size_class = recode(
+      size_class,
+      small_purple = "Small (<2 cm)",
+      large_purple = "Large (>2 cm)"
+    ),
+    density = count / pi
+  )
+```
+
+```{r}
+# Average surveyed units within each block Then calculate site-wide monthly means
+
+urchin_block_month <- urchin_all %>%
+  group_by(
+    site, year, month_date,
+    block_id, size_class
+  ) %>%
+  summarise(
+    density = mean(density),
+    n_surveys = n(),
+    .groups = "drop"
+  )
+
+urchin_monthly <- urchin_block_month %>%
+  group_by(
+    site, year, month_date, size_class
+  ) %>%
+  summarise(
+    n_blocks = n(),
+    n_surveys = sum(n_surveys),
+    mean_density = mean(density),
+    se_density = if (n() > 1)
+      sd(density) / sqrt(n())
+    else NA_real_,
+    .groups = "drop"
+  )
+
+# Check sampling effort
+urchin_monthly %>%
+  arrange(site, year, month_date, size_class) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Shared plotting function
+
+make_urchin_figure <- function(site_name, title_text) {
+
+  ggplot(
+    urchin_monthly %>%
+      filter(site == site_name),
+    aes(
+      x = month_date,
+      y = mean_density,
+      color = size_class,
+      group = interaction(year, size_class)
+    )
+  ) +
+    geom_line(linewidth = 1.1) +
+    geom_point(size = 2.7) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(0, mean_density - se_density),
+        ymax = mean_density + se_density
+      ),
+      width = 5,
+      linewidth = 0.5
+    ) +
+    scale_color_manual(
+      values = c(
+        "Small (<2 cm)" = "#0072B2",
+        "Large (>2 cm)" = "#D55E00"
+      )
+    ) +
+    scale_x_date(
+      date_breaks = "2 months",
+      date_labels = "%b\n%Y"
+    ) +
+    labs(
+      title = title_text,
+      subtitle = "All surveyed plots, 2025–2026; mean ± SE",
+      x = "Month",
+      y = expression(
+        "Purple urchin density (individuals " * m^-2 * ")"
+      ),
+      color = "Size class"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom",
+      axis.text.x = element_text(
+        angle = 45,
+        hjust = 1
+      )
+    )
+}
+
+
+urchin_big_river <- make_urchin_figure(
+  "big_river",
+  "Purple Urchin Density — Big River"
+)
+
+urchin_noyo <- make_urchin_figure(
+  "noyo",
+  "Purple Urchin Density — Noyo"
+)
+
+print(urchin_big_river)
+print(urchin_noyo)
+```
+
+
+
 
 ##analysis
 ```{r}
@@ -2248,475 +7764,6 @@ ggplot(
   )
 ```
 
-
-#cover
-```{r}
-#bring down from top
-library(tidyverse)
-surveys_2025 = read_sheet('https://docs.google.com/spreadsheets/d/1i3KlFK9ZlCHW7vNudpcN0kkriUDP4IahfxkR6CVGroQ/edit?gid=0#gid=0')
-
-surveys_2025 <- surveys_2025 %>%
-  mutate(
-    date = as.Date(
-      paste(year, month, day, sep = "-")
-    )
-  )
-
-surveys_2025 %>%
-  mutate( 
-    site = str_to_lower(str_trim(site)),
-    ARKEV_type = str_to_lower(str_trim(plot_type)),
-    ARKEV_unit = str_trim(ARKEV_unit),
-    data_type = str_to_lower(str_trim(data_type)),
-    species_code = str_to_upper(str_trim(species_code))
-    )
-
-survey_key_2025 <- c(
-  "year",
-  "date",
-  "site",
-  "ARKEV_type",
-  "ARKEV_unit"
-)
-
-surveys_2025 %>%
-  count(data_type, sort = TRUE)
-surveys_2025 %>%
-  count(data_type, species_code, sort = TRUE)
-
-surveys_2025 <- surveys_2025 %>%
-  mutate(
-    count_num = as.numeric(unlist(count)),
-    percent_num = as.numeric(unlist(percent))
-  )
-
-surveys_2025 %>%
-  summarise(
-    count_class = class(count_num),
-    n_missing = sum(is.na(count_num))
-  )
-
-surveys_2025 <- surveys_2025 %>%
-  rename(arkev_unit = ARKEV_unit) %>%
-  mutate(year = 2025)
-
-surveys_2025 <- surveys_2025 %>%
-  mutate(
-    survey_id = paste(
-      date,
-      site,
-      plot_type,
-      arkev_unit,
-      sep = "_"
-    )
-  )
-```
-
-```{r}
-cover_2025 <- surveys_2025 %>%
-  filter(data_type == 'algal_cover',
-    month != "4") %>%
-  mutate(
-    taxon = case_when(
-      species_code == "CRUCOR" ~ "CCA",
-      species_code == "ARTCOR" ~ "ACA",
-      species_code == "ENCRED" ~ "ER",
-      species_code %in% c("BR", "BAREROCK") ~ "BR",
-      species_code == "TURF" ~ "turf",
-      species_code == "FLESHY" ~ "FLESHY",
-      species_code == "SCUM" ~ "SCUM",
-      species_code == "BS" ~ "SAND",
-      TRUE ~ NA_character_
-    ),
-    cover = as.numeric(percent)
-  ) %>%
-  filter(!is.na(taxon))%>%
-  group_by(survey_id, year, date, site, plot_type, arkev_unit, taxon) %>%
-  summarise(
-    cover_raw = sum(cover, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-cover_2025 %>%
-  count(year, site, taxon)
-
-sum(is.na(cover_2025$cover))
-
-cover_2025 %>%
-  summarise(
-    min_cover = min(cover_raw, na.rm = TRUE),
-    max_cover = max(cover_raw, na.rm = TRUE)
-  )
-```
-
-```{r}
-cover_2025_adj <- cover_2025 %>%
-  group_by(
-    survey_id, year, date, site, plot_type, arkev_unit
-  ) %>%
-  mutate(
-    # Underlying algal cover before adjustment
-    underlying_cover = sum(
-      cover_raw[taxon %in% c("CCA", "ACA", "ER", "BR", "turf")],
-      na.rm = TRUE
-    ),
-
-    # Sand is substrate, so this is the available hard substrate
-    hard_substrate = 100 - sum(
-      cover_raw[taxon == "SAND"],
-      na.rm = TRUE
-    ),
-
-    # Only scale surveys where underlying cover exceeds
-    # the available hard substrate.
-    scale_factor = if_else(
-      underlying_cover > hard_substrate &
-        underlying_cover > 0,
-      hard_substrate / underlying_cover,
-      1
-    ),
-
-    # Scale ALL organisms associated with hard substrate.
-    # FLESHY and SCUM remain separate superlayers.
-    cover_clean = cover_raw * scale_factor
-  ) %>%
-  ungroup()
-
-cover_2025_survey <- cover_2025_adj %>%
-  group_by(
-    survey_id, year, date, site, plot_type, arkev_unit
-  ) %>%
-  summarise(
-    CCA = sum(cover_clean[taxon == "CCA"], na.rm = TRUE),
-    ACA = sum(cover_clean[taxon == "ACA"], na.rm = TRUE),
-    ER = sum(cover_clean[taxon == "ER"], na.rm = TRUE),
-    BR = sum(cover_clean[taxon == "BR"], na.rm = TRUE),
-    turf = sum(cover_clean[taxon == "turf"], na.rm = TRUE),
-
-    FLESHY = sum(cover_clean[taxon == "FLESHY"], na.rm = TRUE),
-    SCUM = sum(cover_clean[taxon == "SCUM"], na.rm = TRUE),
-
-    SAND = sum(cover_raw[taxon == "SAND"], na.rm = TRUE),
-
-    .groups = "drop"
-  )
-
-cover_2025_survey %>%
-  mutate(
-    algal_cover = CCA + ACA + ER + BR + turf,
-    hard_substrate = 100 - SAND,
-    difference = algal_cover - hard_substrate
-  ) %>%
-  summarise(
-    n_surveys = n(),
-    n_over_hard_substrate = sum(
-      difference > 0.001,
-      na.rm = TRUE
-    ),
-    min_algal = min(algal_cover, na.rm = TRUE),
-    median_algal = median(algal_cover, na.rm = TRUE),
-    mean_algal = mean(algal_cover, na.rm = TRUE),
-    max_algal = max(algal_cover, na.rm = TRUE)
-  )
-```
-
-```{r}
-cover_2025_survey %>%
-  mutate(
-    algal_cover = CCA + ACA + ER + BR + turf
-  ) %>%
-  select(
-    survey_id, site, plot_type, arkev_unit,
-    algal_cover, SAND, FLESHY, SCUM
-  ) %>%
-  summarise(
-    cor_algal_sand = cor(algal_cover, SAND, use = "complete.obs"),
-    mean_algal = mean(algal_cover, na.rm = TRUE),
-    mean_sand = mean(SAND, na.rm = TRUE),
-    mean_fleshy = mean(FLESHY, na.rm = TRUE),
-    mean_scum = mean(SCUM, na.rm = TRUE)
-  )
-```
-
-```{r}
-cover_2025_survey %>%
-  mutate(
-    algal_cover = CCA + ACA + ER + BR + turf,
-    sand_bin = case_when(
-      SAND == 0 ~ "0% sand",
-      SAND > 0 & SAND <= 20 ~ "1–20% sand",
-      SAND > 20 & SAND <= 50 ~ "21–50% sand",
-      SAND > 50 ~ ">50% sand",
-      TRUE ~ NA_character_
-    )
-  ) %>%
-  group_by(sand_bin) %>%
-  summarise(
-    n = n(),
-    mean_algal = mean(algal_cover, na.rm = TRUE),
-    median_algal = median(algal_cover, na.rm = TRUE),
-    min_algal = min(algal_cover, na.rm = TRUE),
-    max_algal = max(algal_cover, na.rm = TRUE),
-    .groups = "drop"
-  )
-```
-
-```{r}
-cover_2025_survey %>%
-  summarise(
-    min_fleshy = min(FLESHY, na.rm = TRUE),
-    median_fleshy = median(FLESHY, na.rm = TRUE),
-    mean_fleshy = mean(FLESHY, na.rm = TRUE),
-    max_fleshy = max(FLESHY, na.rm = TRUE),
-
-    min_scum = min(SCUM, na.rm = TRUE),
-    median_scum = median(SCUM, na.rm = TRUE),
-    mean_scum = mean(SCUM, na.rm = TRUE),
-    max_scum = max(SCUM, na.rm = TRUE)
-  )
-
-cover_2025_survey %>%
-  summarise(
-    n_fleshy = sum(FLESHY > 0, na.rm = TRUE),
-    n_scum = sum(SCUM > 0, na.rm = TRUE),
-    n_neither = sum(FLESHY == 0 & SCUM == 0, na.rm = TRUE)
-  )
-
-cover_2025_survey %>%
-  summarise(
-    n_fleshy_only = sum(FLESHY > 0 & SCUM == 0),
-    n_scum_only = sum(FLESHY == 0 & SCUM > 0),
-    n_both = sum(FLESHY > 0 & SCUM > 0),
-    n_neither = sum(FLESHY == 0 & SCUM == 0)
-  )
-```
-
-
-
-
-```{r}
-cover_2025_survey %>%
-  mutate(
-    underlying_cover = CCA + ACA + ER + BR + turf,
-    hard_substrate = 100 - SAND,
-    excess = underlying_cover - hard_substrate
-  ) %>%
-  summarise(
-    n_surveys = n(),
-    n_underlying_gt_hard =
-      sum(excess > 0.001, na.rm = TRUE),
-
-    n_fleshy_gt_100 =
-      sum(FLESHY > 100.001, na.rm = TRUE),
-
-    n_scum_gt_100 =
-      sum(SCUM > 100.001, na.rm = TRUE)
-  )
-
-```
-
-
-
-
-
-
-
-```{r}
-cover_2026 <- cover %>%
-  mutate(
-    survey_id = paste(
-      date,
-      site,
-      plot_type,
-      arkev_unit,
-      sep = "_"
-    )
-  ) %>%
-  mutate(
-    across(
-      c(FR, ER, CCA, ACA, FG, brown, turf, scum, BR, SAND),
-      ~ as.numeric(unlist(.))
-    )
-  ) %>%
-  transmute(
-    year,
-    month,
-    date,
-    survey_id,
-    site = str_to_lower(str_trim(site)),
-    plot_type = str_to_lower(str_trim(plot_type)),
-    arkev_unit = str_trim(arkev_unit),
-    CCA,
-    ACA,
-    ER,
-    BR,
-    turf,
-    FLESHY = rowSums(
-      cbind(FR, FG, brown),
-      na.rm = TRUE
-    ),
-    SCUM = scum,
-    SAND
-  ) %>%
-  mutate(
-    # underlying algal layer only
-    algal_cover = CCA + ACA + ER + BR + turf
-  )
-```
-
-```{r}
-cover_2026 %>%
-  summarise(
-    n_surveys = n(),
-    min_algal = min(algal_cover, na.rm = TRUE),
-    median_algal = median(algal_cover, na.rm = TRUE),
-    mean_algal = mean(algal_cover, na.rm = TRUE),
-    max_algal = max(algal_cover, na.rm = TRUE),
-    n_over_100 = sum(algal_cover > 100.001, na.rm = TRUE)
-  )
-```
-
-
-
-##combine 2025-2026 cover
-```{r}
-cover_compare <- bind_rows(
-  
-  cover_2025_survey %>%
-    transmute(
-      year,
-      survey_id,
-      date,
-      site = str_to_lower(str_trim(site)),
-      plot_type = str_to_lower(str_trim(plot_type)),
-      arkev_unit = str_trim(arkev_unit),
-      CCA,
-      ACA,
-      ER,
-      BR,
-      turf,
-      algal_cover = CCA + ACA + ER + BR + turf,
-      FLESHY,
-      SCUM,
-      SAND
-    ),
-  
-  cover_2026 %>%
-    transmute(
-      year,
-      survey_id,
-      date,
-      site,
-      plot_type,
-      arkev_unit,
-      CCA,
-      ACA,
-      ER,
-      BR,
-      turf,
-      algal_cover,
-      FLESHY,
-      SCUM,
-      SAND
-    )
-)
-
-head(cover_compare)
-```
-
-```{R}
-cover_compare %>%
-  count(year, plot_type)
-
-cover_compare %>%
-  group_by(year, plot_type) %>%
-  summarise(
-    n = n(),
-    mean_algal = mean(algal_cover, na.rm = TRUE),
-    median_algal = median(algal_cover, na.rm = TRUE),
-    sd_algal = sd(algal_cover, na.rm = TRUE),
-    min_algal = min(algal_cover, na.rm = TRUE),
-    max_algal = max(algal_cover, na.rm = TRUE),
-    .groups = "drop"
-  )
-```
-
-```{R}
-cover_compare %>%
-  group_by(year, plot_type) %>%
-  summarise(
-    mean_algal = mean(algal_cover, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-ggplot(
-  cover_compare,
-  aes(
-    x = factor(year),
-    y = algal_cover,
-    fill = plot_type
-  )
-) +
-  geom_boxplot(
-    position = position_dodge(width = 0.8),
-    outlier.alpha = 0.3
-  ) +
-  labs(
-    x = "Year",
-    y = "Underlying algal cover (%)",
-    fill = "Plot type"
-  ) +
-  theme_classic()
-```
-
-```{r}
-cover_compare %>%
-  mutate(
-    sand_class = case_when(
-      year == 2026 ~ "2026",
-      year == 2025 & SAND == 0 ~ "2025: 0% sand",
-      year == 2025 & SAND > 0 ~ "2025: >0% sand",
-      TRUE ~ NA_character_
-    )
-  ) %>%
-  group_by(year, plot_type, sand_class) %>%
-  summarise(
-    n = n(),
-    mean_algal = mean(algal_cover, na.rm = TRUE),
-    median_algal = median(algal_cover, na.rm = TRUE),
-    sd_algal = sd(algal_cover, na.rm = TRUE),
-    .groups = "drop"
-  )
-```
-
-```{r}
-cover_compare %>%
-  mutate(
-    comparison_group = case_when(
-      year == 2025 & SAND == 0 ~ "2025: 0% sand",
-      year == 2026 ~ "2026",
-      TRUE ~ NA_character_
-    )
-  ) %>%
-  filter(!is.na(comparison_group)) %>%
-  ggplot(
-    aes(
-      x = comparison_group,
-      y = algal_cover,
-      fill = plot_type
-    )
-  ) +
-  geom_boxplot(
-    position = position_dodge(width = 0.8),
-    outlier.alpha = 0.3
-  ) +
-  labs(
-    x = NULL,
-    y = "Underlying algal cover (%)",
-    fill = "Plot type"
-  ) +
-  theme_classic()
-```
 
 
 #fish

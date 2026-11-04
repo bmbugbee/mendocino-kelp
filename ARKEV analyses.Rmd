@@ -3305,10 +3305,10 @@ ggplot(fish_den_summary,
     size = 0.7
   ) +
   scale_fill_manual(values = den_loc_colors) +
-  theme_bw(base_size = 14) +
-  labs(title = "Average Number of Fish by Treatment",
+  theme_classic(base_size = 14) +
+  labs(title = "Mean fish density by treatment - Big River",
     x = "Treatment",
-    y = "Average Fish Density",
+    y = expression("Fish density (ind  " * m^-2 * ")"),
     fill = "Location"
   )
 ```
