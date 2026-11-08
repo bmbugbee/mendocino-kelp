@@ -7764,41 +7764,5860 @@ ggplot(
   )
 ```
 
-
-
-#fish
+#site differences
+##KELP
 ```{r}
-fish_2025 <- surveys_2025 %>%
-  filter(data_type == c('fish_on', 'fish_off')) 
+library(tidyverse)
+library(lubridate)
+
+# Site-wide 2025–2026 kelp
+# All valid surveys, regardless of treatment or matching
+
+kelp_sitewide <- kelp_2025_2026 %>%
   mutate(
-    taxon = case_when(
-      species_code == "CRUCOR" ~ "CCA",
-      species_code == "ARTCOR" ~ "ACA",
-      species_code == "ENCRED" ~ "ER",
-      species_code %in% c("BR", "BAREROCK") ~ "BR",
-      species_code == "TURF" ~ "turf",
-      species_code == "FLESHY" ~ "FLESHY",
-      TRUE ~ NA_character_
-    ),
-    cover = as.numeric(percent)
+    date = as.Date(date),
+    year = as.integer(year),
+    site = str_replace_all(
+      str_to_lower(str_trim(site)), " ", "_"
+    )
   ) %>%
-  filter(!is.na(taxon))
+  filter(
+    year %in% c(2025, 2026),
+    site %in% c("big_river", "noyo"),
+    if_all(all_of(shared_kelp), ~ !is.na(.x))
+  ) %>%
+  mutate(
+    month = month(date),
+    kelp_total = rowSums(pick(all_of(shared_kelp))),
+    kelp_density = kelp_total / pi
+  )
 
-cover_2025 %>%
-  count(year, site, taxon)
+# Monthly site-wide summary
+# Average surveys within dates, then dates within months
 
-sum(is.na(cover_2025$cover))
-
-cover_2025 %>%
+kelp_sitewide_monthly <- kelp_sitewide %>%
+  group_by(site, year, month, date) %>%
   summarise(
-    min_cover = min(cover, na.rm = TRUE),
-    max_cover = max(cover, na.rm = TRUE)
+    n_surveys = n_distinct(survey_id),
+    mean_date_density = mean(kelp_density),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_dates = n(),
+    n_surveys = sum(n_surveys),
+    mean_density = mean(mean_date_density),
+    .groups = "drop"
+  )
+
+kelp_sitewide_monthly %>%
+  arrange(site, year, month) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Extract plot numbers regardless of the C prefix
+# Include ALL valid 2025 and 2026 surveys
+
+kelp_block_month <- kelp_sitewide %>%
+  mutate(
+    plot_number = as.integer(
+      stringr::str_extract(arkev_unit, "\\d+")
+    )
+  ) %>%
+  group_by(
+    site, year, month, date, plot_number
+  ) %>%
+  summarise(
+    block_date_density = mean(kelp_density),
+    n_surveys = n_distinct(survey_id),
+    .groups = "drop"
+  ) %>%
+  group_by(
+    site, year, month, plot_number
+  ) %>%
+  summarise(
+    block_month_density = mean(block_date_density),
+    n_surveys = sum(n_surveys),
+    n_dates = n_distinct(date),
+    .groups = "drop"
+  )
+
+# Calculate monthly site-wide means and SE
+kelp_month_summary <- kelp_block_month %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_blocks = n(),
+    n_surveys = sum(n_surveys),
+    mean_density = mean(block_month_density),
+    se_density = if (n() > 1) {
+      sd(block_month_density) / sqrt(n())
+    } else {
+      NA_real_
+    },
+    .groups = "drop"
+  )
+
+# Verify that all valid surveys are retained
+kelp_month_summary %>%
+  arrange(site, year, month) %>%
+  print(n = Inf)
+
+# Check for any surveys with unrecognized plot numbers
+kelp_sitewide %>%
+  filter(
+    is.na(
+      stringr::str_extract(arkev_unit, "\\d+")
+    )
+  ) %>%
+  distinct(site, year, arkev_unit)
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+# Prepare monthly summaries for plotting
+kelp_plot_data <- kelp_month_summary %>%
+  mutate(
+    year = factor(year, levels = c(2025, 2026))
+  )
+
+year_colors <- c(
+  "2025" = "#D55E00",
+  "2026" = "#0072B2"
+)
+
+# Function to plot each site separately
+make_kelp_site_fig <- function(site_name, title_text) {
+
+  ggplot(
+    kelp_plot_data %>%
+      filter(site == site_name),
+    aes(
+      x = month,
+      y = mean_density,
+      color = year,
+      group = year
+    )
+  ) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2.8) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(0, mean_density - se_density),
+        ymax = mean_density + se_density
+      ),
+      width = 0.12,
+      linewidth = 0.5
+    ) +
+    scale_color_manual(
+      values = year_colors
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    labs(
+      title = title_text,
+      subtitle = "All valid surveys; mean ± SE across blocks",
+      x = "Month",
+      y = expression(
+        "Kelp density (individuals " * m^-2 * ")"
+      ),
+      color = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+# Big River
+kelp_fig_big_river <- make_kelp_site_fig(
+  "big_river",
+  "Seasonal Kelp Density — Big River"
+)
+
+# Noyo
+kelp_fig_noyo <- make_kelp_site_fig(
+  "noyo",
+  "Seasonal Kelp Density — Noyo"
+)
+
+print(kelp_fig_big_river)
+print(kelp_fig_noyo)
+```
+
+```{r}
+# 2025–2026 site-wide kelp distribution
+# All valid surveys, without treatment effects
+
+kelp_distribution <- kelp_sitewide %>%
+  mutate(
+    kelp_present = kelp_total > 0,
+    plot_number = as.integer(
+      stringr::str_extract(arkev_unit, "\\d+")
+    )
+  ) %>%
+  group_by(site, year) %>%
+  summarise(
+    n_surveys = n_distinct(survey_id),
+    n_blocks = n_distinct(plot_number),
+
+    n_with_kelp = sum(kelp_present),
+    n_without_kelp = sum(!kelp_present),
+
+    pct_with_kelp = 100 * mean(kelp_present),
+
+    mean_count = mean(kelp_total),
+    median_count = median(kelp_total),
+    variance_count = var(kelp_total),
+    maximum_count = max(kelp_total),
+
+    mean_density = mean(kelp_density),
+
+    .groups = "drop"
+  )
+
+kelp_distribution %>%
+  arrange(site, year) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Calculate kelp occurrence for each survey
+kelp_occurrence <- kelp_sitewide %>%
+  mutate(
+    kelp_present = as.integer(kelp_total > 0),
+
+    plot_number = as.integer(
+      stringr::str_extract(arkev_unit, "\\d+")
+    )
+  )
+
+# First average within each block and sampling date
+kelp_occurrence_block_date <- kelp_occurrence %>%
+  group_by(
+    site, year, month, date, plot_number
+  ) %>%
+  summarise(
+    block_date_occurrence = mean(kelp_present),
+    n_surveys = n_distinct(survey_id),
+    .groups = "drop"
+  )
+
+# Then average dates within each block and month
+kelp_occurrence_block_month <- kelp_occurrence_block_date %>%
+  group_by(
+    site, year, month, plot_number
+  ) %>%
+  summarise(
+    block_month_occurrence = mean(block_date_occurrence),
+    n_surveys = sum(n_surveys),
+    .groups = "drop"
+  )
+
+# Calculate monthly occurrence across independent blocks
+kelp_occurrence_monthly <- kelp_occurrence_block_month %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_blocks = n(),
+    n_surveys = sum(n_surveys),
+
+    mean_occurrence = 100 * mean(block_month_occurrence),
+
+    se_occurrence = 100 *
+      sd(block_month_occurrence) / sqrt(n_blocks),
+
+    .groups = "drop"
+  )
+
+kelp_occurrence_monthly %>%
+  arrange(site, year, month) %>%
+  print(n = Inf)
+```
+
+```{r}
+library(tidyverse)
+library(lme4)
+
+# Prepare site-wide kelp occurrence data
+kelp_occ_model <- kelp_sitewide %>%
+  mutate(
+    kelp_present = as.integer(kelp_total > 0),
+
+    site = factor(
+      site,
+      levels = c("big_river", "noyo")
+    ),
+
+    year = factor(
+      year,
+      levels = c(2025, 2026)
+    ),
+
+    month = factor(month),
+
+    plot_number = as.integer(
+      str_extract(arkev_unit, "\\d+")
+    ),
+
+    # Different block identities for each year
+    site_year_block = interaction(
+      site, year, plot_number,
+      drop = TRUE
+    ),
+
+    # Surveys collected on the same site-date
+    site_date = interaction(
+      site, date,
+      drop = TRUE
+    )
+  ) %>%
+  filter(
+    !is.na(plot_number),
+    !is.na(kelp_present)
+  )
+
+# Model without site × year interaction
+kelp_occ_additive <- glmer(
+  kelp_present ~ site + year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = kelp_occ_model,
+  family = binomial,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 2e5)
+  )
+)
+
+# Model with site × year interaction
+kelp_occ_interaction <- glmer(
+  kelp_present ~ site * year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = kelp_occ_model,
+  family = binomial,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 2e5)
+  )
+)
+
+# Inspect model results
+summary(kelp_occ_interaction)
+
+# Test whether year differences vary between sites
+anova(
+  kelp_occ_additive,
+  kelp_occ_interaction,
+  test = "Chisq"
+)
+
+# Check for singular fits
+isSingular(kelp_occ_interaction)
+```
+
+```{r}
+# Shared-season sensitivity analysis
+# July–August, all valid surveys, no treatment factor
+
+kelp_occ_shared <- kelp_occ_model %>%
+  filter(as.character(month) %in% c("7", "8")) %>%
+  mutate(month = droplevels(month))
+
+# Check sample sizes
+kelp_occ_shared %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_surveys = n(),
+    n_blocks = n_distinct(site_year_block),
+    occurrence = 100 * mean(kelp_present),
+    .groups = "drop"
+  ) %>%
+  print(n = Inf)
+
+# Additive model
+kelp_occ_shared_add <- glmer(
+  kelp_present ~ site + year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = kelp_occ_shared,
+  family = binomial,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 2e5)
+  )
+)
+
+# Interaction model
+kelp_occ_shared_int <- glmer(
+  kelp_present ~ site * year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = kelp_occ_shared,
+  family = binomial,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 2e5)
+  )
+)
+
+# Results
+summary(kelp_occ_shared_int)
+
+anova(
+  kelp_occ_shared_add,
+  kelp_occ_shared_int,
+  test = "Chisq"
+)
+
+isSingular(kelp_occ_shared_int)
+```
+ 
+```{r}
+# Shared-season kelp occurrence models
+# July–August, without the site-date random effect
+
+kelp_occ_shared_add2 <- glmer(
+  kelp_present ~ site + year + month +
+    (1 | site_year_block),
+  data = kelp_occ_shared,
+  family = binomial,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 2e5)
+  )
+)
+
+kelp_occ_shared_int2 <- glmer(
+  kelp_present ~ site * year + month +
+    (1 | site_year_block),
+  data = kelp_occ_shared,
+  family = binomial,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 2e5)
+  )
+)
+
+# Inspect the simplified interaction model
+summary(kelp_occ_shared_int2)
+
+# Test the site × year interaction
+anova(
+  kelp_occ_shared_add2,
+  kelp_occ_shared_int2,
+  test = "Chisq"
+)
+
+# Check whether the singular fit is resolved
+isSingular(kelp_occ_shared_int2)
+```
+
+```{r}
+library(glmmTMB)
+
+# Full-season kelp abundance model
+# All valid 2025–2026 surveys
+# No treatment factor
+
+# Additive model
+kelp_count_add <- glmmTMB(
+  kelp_total ~ site + year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = kelp_occ_model,
+  family = nbinom2
+)
+
+# Site × Year interaction model
+kelp_count_int <- glmmTMB(
+  kelp_total ~ site * year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = kelp_occ_model,
+  family = nbinom2
+)
+
+# Examine the interaction model
+summary(kelp_count_int)
+
+# Test whether year differences vary by site
+anova(
+  kelp_count_add,
+  kelp_count_int
+)
+
+# Check model convergence
+kelp_count_int$fit$convergence
+
+# Check for positive-definite Hessian
+kelp_count_int$sdr$pdHess
+```
+
+```{r}
+library(DHARMa)
+
+set.seed(123)
+
+# Simulate residuals from the negative-binomial model
+kelp_count_res <- simulateResiduals(
+  fittedModel = kelp_count_int,
+  n = 1000
+)
+
+# Visual diagnostics
+plot(kelp_count_res)
+
+# Test residual dispersion
+testDispersion(kelp_count_res)
+
+# Test whether zeros are adequately modeled
+testZeroInflation(kelp_count_res)
+
+# Test for unusual observations
+testOutliers(kelp_count_res)
+```
+
+```{r}
+# Shared-season kelp abundance analysis
+# July–August, all valid surveyed locations
+# No treatment factor
+
+kelp_count_shared <- kelp_occ_model %>%
+  filter(as.character(month) %in% c("7", "8")) %>%
+  mutate(
+    month = droplevels(month)
+  )
+
+# Additive model
+kelp_count_shared_add <- glmmTMB(
+  kelp_total ~ site + year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = kelp_count_shared,
+  family = nbinom2
+)
+
+# Site × Year interaction model
+kelp_count_shared_int <- glmmTMB(
+  kelp_total ~ site * year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = kelp_count_shared,
+  family = nbinom2
+)
+
+# Inspect interaction model
+summary(kelp_count_shared_int)
+
+# Test interaction
+anova(
+  kelp_count_shared_add,
+  kelp_count_shared_int
+)
+
+# Inspect random-effect variances
+VarCorr(kelp_count_shared_int)
+
+# Convergence diagnostics
+kelp_count_shared_int$fit$convergence
+kelp_count_shared_int$sdr$pdHess
+```
+
+```{r}
+# Shared-season negative-binomial models
+# July–August, all valid surveys
+# No treatment factor
+
+kelp_count_shared_add2 <- glmmTMB(
+  kelp_total ~ site + year + month +
+    (1 | site_year_block),
+  data = kelp_count_shared,
+  family = nbinom2
+)
+
+kelp_count_shared_int2 <- glmmTMB(
+  kelp_total ~ site * year + month +
+    (1 | site_year_block),
+  data = kelp_count_shared,
+  family = nbinom2
+)
+
+# Examine simplified model
+summary(kelp_count_shared_int2)
+
+# Test site × year interaction
+anova(
+  kelp_count_shared_add2,
+  kelp_count_shared_int2
+)
+
+# Check remaining random-effect variance
+VarCorr(kelp_count_shared_int2)
+
+# Check convergence
+kelp_count_shared_int2$fit$convergence
+kelp_count_shared_int2$sdr$pdHess
+```
+
+```{r}
+library(emmeans)
+
+# Estimated kelp abundance by year within each site
+kelp_count_shared_emm <- emmeans(
+  kelp_count_shared_int2,
+  ~ year | site,
+  component = "cond"
+)
+
+# Compare 2026 relative to 2025 within each site
+kelp_count_shared_contrasts <- contrast(
+  kelp_count_shared_emm,
+  method = "revpairwise"
+)
+
+# Abundance ratios, 95% CIs, and p-values
+summary(
+  kelp_count_shared_contrasts,
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+```
+
+```{r}
+library(DHARMa)
+
+set.seed(123)
+
+kelp_count_shared_res <- simulateResiduals(
+  fittedModel = kelp_count_shared_int2,
+  n = 1000
+)
+
+# Diagnostic plots
+plot(kelp_count_shared_res)
+
+# Statistical tests
+testDispersion(kelp_count_shared_res)
+testZeroInflation(kelp_count_shared_res)
+testOutliers(kelp_count_shared_res)
+```
+
+```{r}
+library(emmeans)
+
+# Estimated kelp occurrence by year within each site
+kelp_occ_shared_emm <- emmeans(
+  kelp_occ_shared_int2,
+  ~ year | site
+)
+
+# Compare 2026 relative to 2025
+kelp_occ_shared_contrasts <- contrast(
+  kelp_occ_shared_emm,
+  method = "revpairwise"
+)
+
+# Odds ratios, 95% confidence intervals, and p-values
+summary(
+  kelp_occ_shared_contrasts,
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+```
+
+```{r}
+library(DHARMa)
+
+set.seed(123)
+
+# Residual diagnostics for final occurrence model
+kelp_occ_shared_res <- simulateResiduals(
+  fittedModel = kelp_occ_shared_int2,
+  n = 1000
+)
+
+# Diagnostic plots
+plot(kelp_occ_shared_res)
+
+# Statistical tests
+testUniformity(kelp_occ_shared_res)
+testDispersion(kelp_occ_shared_res)
+testOutliers(kelp_occ_shared_res)
+```
+
+```{r}
+# Inspect kelp variables available for 2025–2026
+
+shared_kelp
+
+# Summarize total abundance and occurrence by kelp variable
+
+kelp_species_summary <- kelp_sitewide %>%
+  summarise(
+    across(
+      all_of(shared_kelp),
+      list(
+        total = ~ sum(.x, na.rm = TRUE),
+        occurrence = ~ sum(.x > 0, na.rm = TRUE)
+      )
+    ),
+    .by = c(site, year)
+  )
+
+kelp_species_summary %>%
+  print(width = Inf)
+```
+
+```{r}
+# Prepare kelp community data at the block-date level
+# All valid surveys, no treatment distinction
+
+kelp_comm_block_date <- kelp_sitewide %>%
+  mutate(
+    plot_number = as.integer(
+      stringr::str_extract(arkev_unit, "\\d+")
+    )
+  ) %>%
+  group_by(
+    site, year, date, month, plot_number
+  ) %>%
+  summarise(
+    across(
+      all_of(shared_kelp),
+      mean
+    ),
+    n_surveys = n_distinct(survey_id),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_kelp = rowSums(
+      pick(all_of(shared_kelp))
+    ),
+    n_kelp_groups = rowSums(
+      pick(all_of(shared_kelp)) > 0
+    )
+  )
+
+# Check how many block-date units contain kelp
+
+kelp_comm_coverage <- kelp_comm_block_date %>%
+  group_by(site, year) %>%
+  summarise(
+    n_block_dates = n(),
+
+    n_positive_block_dates = sum(
+      total_kelp > 0
+    ),
+
+    n_zero_block_dates = sum(
+      total_kelp == 0
+    ),
+
+    n_positive_blocks = n_distinct(
+      plot_number[total_kelp > 0]
+    ),
+
+    mean_groups_when_present = if (
+      any(total_kelp > 0)
+    ) {
+      mean(n_kelp_groups[total_kelp > 0])
+    } else {
+      NA_real_
+    },
+
+    .groups = "drop"
+  )
+
+kelp_comm_coverage %>%
+  arrange(site, year) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Relative kelp community composition
+# All valid surveys, no treatment factor
+# Block-date means used to avoid subplot pseudoreplication
+
+kelp_composition <- kelp_comm_block_date %>%
+  filter(total_kelp > 0) %>%
+  select(
+    site, year, date, plot_number,
+    all_of(shared_kelp)
+  ) %>%
+  pivot_longer(
+    cols = all_of(shared_kelp),
+    names_to = "kelp_group",
+    values_to = "mean_count"
+  ) %>%
+  group_by(site, year, kelp_group) %>%
+  summarise(
+    mean_abundance = mean(mean_count),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year) %>%
+  mutate(
+    relative_abundance = 100 *
+      mean_abundance / sum(mean_abundance)
+  ) %>%
+  ungroup() %>%
+  arrange(site, year, desc(relative_abundance))
+
+# Display community composition percentages
+kelp_composition %>%
+  select(
+    site, year, kelp_group,
+    mean_abundance, relative_abundance
+  ) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Kelp community composition by site and year
+# Relative abundance among kelp-positive block-dates
+
+kelp_comp_plot_data <- kelp_composition %>%
+  mutate(
+    site = factor(
+      site,
+      levels = c("big_river", "noyo"),
+      labels = c("Big River", "Noyo")
+    ),
+    year = factor(
+      year,
+      levels = c(2025, 2026)
+    ),
+    kelp_group = factor(
+      kelp_group,
+      levels = shared_kelp
+    )
+  )
+
+kelp_comp_colors <- c(
+  "NERA" = "#E69F00",
+  "NERJ" = "#D55E00",
+  "LAMR" = "#009E73",
+  "LAMSET" = "#56B4E9",
+  "PTECAL" = "#CC79A7",
+  "DESSPP" = "#0072B2",
+  "ALAMAR" = "#999999",
+  "COSCOS" = "#F0E442",
+  "LAMSTUMP" = "#663399"
+)
+
+kelp_comp_fig <- ggplot(
+  kelp_comp_plot_data,
+  aes(
+    x = year,
+    y = relative_abundance,
+    fill = kelp_group
+  )
+) +
+  geom_col(
+    width = 0.65,
+    color = "black",
+    linewidth = 0.2
+  ) +
+  facet_wrap(~ site) +
+  scale_fill_manual(
+    values = kelp_comp_colors,
+    name = "Kelp group"
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 100, 20),
+    limits = c(0, 100),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  labs(
+    title = "Kelp Community Composition, 2025–2026",
+    subtitle = "Relative abundance among kelp-positive block-dates",
+    x = "Year",
+    y = "Relative abundance (%)"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom",
+    legend.key.size = unit(0.5, "cm")
+  ) +
+  guides(
+    fill = guide_legend(ncol = 3)
+  )
+
+print(kelp_comp_fig)
+```
+
+```{r}
+# Hurricane plot data
+kelp_hurricane_data <- kelp_composition %>%
+  mutate(
+    site = factor(
+      site,
+      levels = c("big_river", "noyo"),
+      labels = c("Big River", "Noyo")
+    ),
+    year = factor(year, levels = c(2025, 2026)),
+    kelp_group = factor(
+      kelp_group,
+      levels = rev(shared_kelp)
+    ),
+    plot_abundance = if_else(
+      year == "2025",
+      -relative_abundance,
+      relative_abundance
+    )
+  )
+
+year_colors <- c(
+  "2025" = "#D55E00",
+  "2026" = "#0072B2"
+)
+
+# Function to make one site-specific figure
+make_kelp_hurricane <- function(site_name) {
+  ggplot(
+    kelp_hurricane_data %>% filter(site == site_name),
+    aes(
+      x = plot_abundance,
+      y = kelp_group,
+      fill = year
+    )
+  ) +
+    geom_vline(
+      xintercept = 0,
+      color = "black",
+      linewidth = 0.5
+    ) +
+    geom_col(
+      width = 0.7,
+      color = "black",
+      linewidth = 0.2
+    ) +
+    scale_fill_manual(
+      values = year_colors,
+      name = "Year"
+    ) +
+    scale_x_continuous(
+      breaks = seq(-100, 100, 25),
+      labels = function(x) paste0(abs(x), "%"),
+      expand = expansion(mult = c(0.02, 0.02))
+    ) +
+    coord_cartesian(xlim = c(-105, 105)) +
+    labs(
+      title = paste("Kelp Community Composition, 2025–2026 —", site_name),
+      subtitle = "Relative abundance among kelp-positive block-dates",
+      x = "Relative abundance (%)",
+      y = "Kelp group"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+# Separate figures
+kelp_hurricane_big_river <- make_kelp_hurricane("Big River")
+kelp_hurricane_noyo <- make_kelp_hurricane("Noyo")
+
+kelp_hurricane_big_river
+kelp_hurricane_noyo
+```
+
+```{r}
+# Species-specific kelp density
+# 2025–2026, all valid surveys, no treatment factor
+
+focal_kelp <- c(
+  "DESSPP",
+  "LAMR",
+  "NERJ",
+  "NERA"
+)
+
+kelp_species_monthly <- kelp_sitewide %>%
+  mutate(
+    plot_number = as.integer(
+      str_extract(arkev_unit, "\\d+")
+    )
+  ) %>%
+  pivot_longer(
+    cols = all_of(focal_kelp),
+    names_to = "kelp_group",
+    values_to = "count"
+  ) %>%
+  group_by(
+    site, year, month, date,
+    plot_number, kelp_group
+  ) %>%
+  summarise(
+    block_date_density = mean(count / pi),
+    .groups = "drop"
+  ) %>%
+  group_by(
+    site, year, month,
+    plot_number, kelp_group
+  ) %>%
+  summarise(
+    block_month_density = mean(block_date_density),
+    .groups = "drop"
+  ) %>%
+  group_by(
+    site, year, month, kelp_group
+  ) %>%
+  summarise(
+    n_blocks = n(),
+    mean_density = mean(block_month_density),
+    se_density = sd(block_month_density) / sqrt(n_blocks),
+    .groups = "drop"
+  )
+
+# Summarize the four species for each site and year
+kelp_species_overview <- kelp_species_monthly %>%
+  group_by(site, year, kelp_group) %>%
+  summarise(
+    n_months = n(),
+    mean_monthly_density = mean(mean_density),
+    peak_monthly_density = max(mean_density),
+    .groups = "drop"
+  ) %>%
+  arrange(site, kelp_group, year)
+
+kelp_species_overview %>%
+  print(n = Inf)
+```
+```{r}
+kelp_other_taxa <- setdiff(
+  shared_kelp,
+  c("NERA", "NERJ", "LAMSTUMP")
+)
+
+kelp_richness_sitewide <- kelp_sitewide %>%
+  prepare_integrated() %>%
+  mutate(
+    kelp_richness =
+      as.integer(NERA > 0 | NERJ > 0) +
+      rowSums(
+        as.matrix(pick(all_of(kelp_other_taxa))) > 0
+      )
+  )
+
+# Average surveys within block-dates
+kelp_richness_block_date <- kelp_richness_sitewide %>%
+  group_by(site, year, date, plot_number) %>%
+  summarise(
+    mean_richness = mean(kelp_richness),
+    .groups = "drop"
+  ) %>%
+  mutate(month = as.integer(format(date, "%m")))
+
+# Average dates within block-months
+kelp_richness_block_month <- kelp_richness_block_date %>%
+  group_by(site, year, month, plot_number) %>%
+  summarise(
+    block_richness = mean(mean_richness),
+    .groups = "drop"
+  )
+
+# Monthly site-wide mean richness ± SE
+kelp_richness_month_summary <- kelp_richness_block_month %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_blocks = n(),
+    mean_richness = mean(block_richness),
+    se_richness = sd(block_richness) / sqrt(n_blocks),
+    .groups = "drop"
+  )
+
+# Annual block-weighted richness
+kelp_richness_year <- kelp_richness_block_month %>%
+  group_by(site, year, plot_number) %>%
+  summarise(
+    block_richness = mean(block_richness),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year) %>%
+  summarise(
+    n_blocks = n(),
+    mean_richness = mean(block_richness),
+    se_richness = sd(block_richness) / sqrt(n_blocks),
+    .groups = "drop"
+  )
+
+print(kelp_richness_year, n = Inf)
+print(kelp_richness_month_summary, n = Inf)
+```
+
+```{r}
+make_kelp_richness_plot <- function(site_name) {
+
+  plot_data <- kelp_richness_month_summary %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026))
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = month,
+      y = mean_richness,
+      color = year,
+      group = year
+    )
+  ) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2.8) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(0, mean_richness - se_richness),
+        ymax = mean_richness + se_richness
+      ),
+      width = 0.15,
+      linewidth = 0.5
+    ) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    coord_cartesian(ylim = c(0, NA)) +
+    labs(
+      title = paste("Kelp Taxon Richness —", site_title),
+      x = "Month",
+      y = "Mean kelp taxa per survey",
+      color = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+kelp_richness_big_river <- make_kelp_richness_plot("big_river")
+kelp_richness_noyo <- make_kelp_richness_plot("noyo")
+
+print(kelp_richness_big_river)
+print(kelp_richness_noyo)
+```
+
+```{r}
+kelp_richness_model <- kelp_richness_sitewide %>%
+  mutate(
+    site = factor(site, levels = c("big_river", "noyo")),
+    year = factor(year, levels = c(2025, 2026)),
+    month = factor(format(date, "%m")),
+    site_year_block = interaction(
+      site, year, plot_number, drop = TRUE
+    ),
+    site_date = interaction(site, date, drop = TRUE)
+  )
+
+kelp_rich_add <- glmmTMB(
+  kelp_richness ~ site + year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  family = poisson,
+  data = kelp_richness_model
+)
+
+kelp_rich_int <- glmmTMB(
+  kelp_richness ~ site * year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  family = poisson,
+  data = kelp_richness_model
+)
+
+anova(kelp_rich_add, kelp_rich_int)
+summary(kelp_rich_int)
+
+kelp_rich_int$fit$convergence
+kelp_rich_int$sdr$pdHess
+VarCorr(kelp_rich_int)
+
+set.seed(123)
+
+kelp_rich_res <- DHARMa::simulateResiduals(
+  kelp_rich_int,
+  n = 1000
+)
+
+plot(kelp_rich_res)
+
+DHARMa::testUniformity(kelp_rich_res)
+DHARMa::testDispersion(kelp_rich_res)
+DHARMa::testZeroInflation(kelp_rich_res)
+```
+
+```{r}
+kelp_rich_year_emm <- emmeans(
+  kelp_rich_int,
+  ~ year | site
+)
+
+kelp_rich_year_results <- summary(
+  pairs(kelp_rich_year_emm, reverse = TRUE),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+print(kelp_rich_year_results)
+```
+
+```{r}
+kelp_rich_shared <- kelp_richness_model %>%
+  filter(month %in% c("07", "08")) %>%
+  droplevels()
+
+kelp_rich_shared_add <- glmmTMB(
+  kelp_richness ~ site + year + month +
+    (1 | site_year_block),
+  family = poisson,
+  data = kelp_rich_shared
+)
+
+kelp_rich_shared_int <- glmmTMB(
+  kelp_richness ~ site * year + month +
+    (1 | site_year_block),
+  family = poisson,
+  data = kelp_rich_shared
+)
+
+anova(kelp_rich_shared_add, kelp_rich_shared_int)
+
+summary(
+  pairs(
+    emmeans(kelp_rich_shared_int, ~ year | site),
+    reverse = TRUE
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+kelp_rich_shared_int$fit$convergence
+kelp_rich_shared_int$sdr$pdHess
+```
+
+
+##INVERTEBRATES
+```{r}
+# All valid surveys, no treatment distinction
+# Excludes HALRUF and HALKAM
+
+library(tidyverse)
+library(lubridate)
+
+# Define invertebrate variables, excluding abalone
+invert_vars_used <- setdiff(
+  inverts,
+  c("HALRUF", "HALKAM")
+)
+
+# Prepare site-wide invertebrate dataset
+invert_sitewide <- invert_2025_2026 %>%
+  mutate(
+    date = as.Date(date),
+    year = as.integer(year),
+    site = str_replace_all(
+      str_to_lower(str_trim(site)), " ", "_"
+    ),
+    plot_number = as.integer(
+      str_extract(as.character(arkev_unit), "\\d+")
+    )
+  ) %>%
+  filter(
+    year %in% c(2025, 2026),
+    site %in% c("big_river", "noyo"),
+    !is.na(date),
+    !is.na(plot_number),
+    if_all(all_of(invert_vars_used), ~ !is.na(.x))
+  ) %>%
+  mutate(
+    month = month(date),
+    invert_total = rowSums(
+      pick(all_of(invert_vars_used))
+    ),
+    invert_present = as.integer(invert_total > 0),
+    invert_density = invert_total / pi
+  )
+
+# Annual distribution and sampling coverage
+invert_distribution <- invert_sitewide %>%
+  group_by(site, year) %>%
+  summarise(
+    n_surveys = n_distinct(survey_id),
+    n_blocks = n_distinct(plot_number),
+    n_with_inverts = sum(invert_present),
+    n_without_inverts = sum(!invert_present),
+    pct_with_inverts = 100 * mean(invert_present),
+    mean_count = mean(invert_total),
+    median_count = median(invert_total),
+    variance_count = var(invert_total),
+    mean_density = mean(invert_density),
+    .groups = "drop"
+  )
+
+print(invert_distribution, n = Inf)
+```
+
+```{r}
+# Average all surveyed subplots within each block and date
+invert_block_date <- invert_sitewide %>%
+  group_by(site, year, month, date, plot_number) %>%
+  summarise(
+    block_date_density = mean(invert_density),
+    block_date_occurrence = mean(invert_present),
+    n_surveys = n_distinct(survey_id),
+    .groups = "drop"
+  )
+
+# Average sampling dates within each block and month
+invert_block_month <- invert_block_date %>%
+  group_by(site, year, month, plot_number) %>%
+  summarise(
+    block_month_density = mean(block_date_density),
+    block_month_occurrence = mean(block_date_occurrence),
+    n_surveys = sum(n_surveys),
+    .groups = "drop"
+  )
+
+# Calculate monthly site-wide means ± SE across blocks
+invert_month_summary <- invert_block_month %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_blocks = n(),
+    n_surveys = sum(n_surveys),
+
+    mean_density = mean(block_month_density),
+    se_density = if (n() > 1) {
+      sd(block_month_density) / sqrt(n())
+    } else {
+      NA_real_
+    },
+
+    mean_occurrence = 100 * mean(block_month_occurrence),
+    se_occurrence = if (n() > 1) {
+      100 * sd(block_month_occurrence) / sqrt(n())
+    } else {
+      NA_real_
+    },
+
+    .groups = "drop"
+  )
+
+print(invert_month_summary, n = Inf)
+
+invert_richness_sitewide <- invert_sitewide %>%
+  mutate(
+    invert_richness = rowSums(
+      as.matrix(pick(all_of(invert_vars_used))) > 0
+    )
+  )
+
+```
+
+```{r}
+# INVERTEBRATES: Seasonal figures
+# Excludes HALRUF and HALKAM
+# No treatment factor
+
+invert_plot_data <- invert_month_summary %>%
+  mutate(
+    year = factor(year, levels = c(2025, 2026))
+  )
+
+year_colors <- c(
+  "2025" = "#D55E00",
+  "2026" = "#0072B2"
+)
+
+make_invert_fig <- function(
+  site_name,
+  response = c("density", "occurrence")
+) {
+
+  response <- match.arg(response)
+
+  mean_col <- if (response == "density") {
+    "mean_density"
+  } else {
+    "mean_occurrence"
+  }
+
+  se_col <- if (response == "density") {
+    "se_density"
+  } else {
+    "se_occurrence"
+  }
+
+  y_label <- if (response == "density") {
+    expression(
+      "Invertebrate density (ind   " * m^-2 * ")"
+    )
+  } else {
+    "Invertebrate occurrence (%)"
+  }
+
+  title_text <- if (response == "density") {
+    "Invertebrate Density"
+  } else {
+    "Invertebrate Occurrence"
+  }
+
+  ggplot(
+    invert_plot_data %>%
+      filter(site == site_name),
+    aes(
+      x = month,
+      y = .data[[mean_col]],
+      color = year,
+      group = year
+    )
+  ) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2.8) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(
+          0,
+          .data[[mean_col]] - .data[[se_col]]
+        ),
+        ymax = .data[[mean_col]] + .data[[se_col]]
+      ),
+      width = 0.12,
+      linewidth = 0.5
+    ) +
+    scale_color_manual(
+      values = year_colors
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    labs(
+      title = paste(
+        title_text,
+        "—",
+        if_else(
+          site_name == "big_river",
+          "Big River",
+          "Noyo"
+        )
+      ),
+      x = "Month",
+      y = y_label,
+      color = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+# Density figures
+invert_density_big_river <- make_invert_fig(
+  "big_river", "density"
+)
+
+invert_density_noyo <- make_invert_fig(
+  "noyo", "density"
+)
+
+# Occurrence figures
+invert_occ_big_river <- make_invert_fig(
+  "big_river", "occurrence"
+)
+
+invert_occ_noyo <- make_invert_fig(
+  "noyo", "occurrence"
+)
+
+invert_density_big_river <- invert_density_big_river +
+  coord_cartesian(ylim = c(0, NA))
+
+invert_density_noyo <- invert_density_noyo +
+  coord_cartesian(ylim = c(0, NA))
+
+invert_occ_big_river <- invert_occ_big_river +
+  coord_cartesian(ylim = c(0, 100))
+
+invert_occ_noyo <- invert_occ_noyo +
+  coord_cartesian(ylim = c(0, 100))
+
+# Display
+print(invert_density_big_river)
+print(invert_density_noyo)
+
+print(invert_occ_big_river)
+print(invert_occ_noyo)
+
+
+```
+
+```{r}
+library(glmmTMB)
+library(DHARMa)
+
+# Shared-season invertebrate abundance
+# July–August, all valid surveys
+# Excludes HALRUF and HALKAM
+# No treatment factor
+
+invert_model_shared <- invert_sitewide %>%
+  filter(month %in% c(7, 8)) %>%
+  mutate(
+    site = factor(
+      site,
+      levels = c("big_river", "noyo")
+    ),
+    year = factor(
+      year,
+      levels = c(2025, 2026)
+    ),
+    month = factor(month),
+
+    site_year_block = interaction(
+      site, year, plot_number,
+      drop = TRUE
+    )
+  )
+
+# Check sample sizes
+invert_model_shared %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_surveys = n(),
+    n_blocks = n_distinct(site_year_block),
+    mean_count = mean(invert_total),
+    .groups = "drop"
+  ) %>%
+  print(n = Inf)
+
+# Additive model
+invert_count_add <- glmmTMB(
+  invert_total ~ site + year + month +
+    (1 | site_year_block),
+  data = invert_model_shared,
+  family = poisson
+)
+
+# Site × Year interaction model
+invert_count_int <- glmmTMB(
+  invert_total ~ site * year + month +
+    (1 | site_year_block),
+  data = invert_model_shared,
+  family = poisson
+)
+
+# Model results
+summary(invert_count_int)
+
+# Test interaction
+anova(
+  invert_count_add,
+  invert_count_int
+)
+
+# Check convergence
+invert_count_int$fit$convergence
+invert_count_int$sdr$pdHess
+
+# Residual diagnostics
+set.seed(123)
+
+invert_count_res <- simulateResiduals(
+  invert_count_int,
+  n = 1000
+)
+
+plot(invert_count_res)
+
+testDispersion(invert_count_res)
+testZeroInflation(invert_count_res)
+```
+
+```{r}
+library(emmeans)
+
+# Examine the additive Poisson model
+summary(invert_count_add)
+
+# Overall difference between 2025 and 2026
+invert_year_emm <- emmeans(
+  invert_count_add,
+  ~ year
+)
+
+summary(
+  contrast(
+    invert_year_emm,
+    method = "revpairwise"
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+# Overall difference between Big River and Noyo
+invert_site_emm <- emmeans(
+  invert_count_add,
+  ~ site
+)
+
+summary(
+  contrast(
+    invert_site_emm,
+    method = "revpairwise"
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+```
+
+```{r}
+# INVERTEBRATE OCCURRENCE: 2025–2026
+# July–August, all valid surveys
+# Excludes HALRUF and HALKAM
+# No treatment factor
+
+library(glmmTMB)
+library(emmeans)
+library(DHARMa)
+
+# Additive model
+invert_occ_add <- glmmTMB(
+  invert_present ~ site + year + month +
+    (1 | site_year_block),
+  data = invert_model_shared,
+  family = binomial
+)
+
+# Site × Year interaction model
+invert_occ_int <- glmmTMB(
+  invert_present ~ site * year + month +
+    (1 | site_year_block),
+  data = invert_model_shared,
+  family = binomial
+)
+
+# Test whether year differences vary between sites
+anova(invert_occ_add, invert_occ_int)
+
+# Inspect additive model
+summary(invert_occ_add)
+
+# Overall year comparison
+summary(
+  contrast(
+    emmeans(invert_occ_add, ~ year),
+    method = "revpairwise"
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+# Overall site comparison
+summary(
+  contrast(
+    emmeans(invert_occ_add, ~ site),
+    method = "revpairwise"
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+# Check convergence
+invert_occ_add$fit$convergence
+invert_occ_add$sdr$pdHess
+invert_occ_int$fit$convergence
+invert_occ_int$sdr$pdHess
+```
+
+```{r}
+library(DHARMa)
+library(tidyverse)
+
+#Check occurrence model diagnostics
+
+set.seed(123)
+
+invert_occ_res <- simulateResiduals(
+  fittedModel = invert_occ_add,
+  n = 1000
+)
+
+plot(invert_occ_res)
+
+testUniformity(invert_occ_res)
+testDispersion(invert_occ_res)
+testOutliers(invert_occ_res)
+
+
+#Species-specific invertebrate overview
+# All valid surveys from both years
+# Excludes HALRUF and HALKAM
+
+invert_species_summary <- invert_sitewide %>%
+  select(
+    site, year,
+    all_of(invert_vars_used)
+  ) %>%
+  pivot_longer(
+    cols = all_of(invert_vars_used),
+    names_to = "species",
+    values_to = "count"
+  ) %>%
+  group_by(site, year, species) %>%
+  summarise(
+    n_surveys = n(),
+    total_count = sum(count),
+    mean_density = mean(count) / pi,
+    pct_occurrence = 100 * mean(count > 0),
+    .groups = "drop"
+  )
+
+# Identify the 8 most abundant species
+# at each site, considering both years
+
+top_invert_species <- invert_species_summary %>%
+  group_by(site, species) %>%
+  summarise(
+    combined_total = sum(total_count),
+    .groups = "drop"
+  ) %>%
+  group_by(site) %>%
+  slice_max(
+    combined_total,
+    n = 8,
+    with_ties = FALSE
+  ) %>%
+  ungroup() %>%
+  select(site, species)
+
+# Display species-specific density and occurrence
+invert_species_summary %>%
+  semi_join(
+    top_invert_species,
+    by = c("site", "species")
+  ) %>%
+  arrange(site, species, year) %>%
+  print(n = Inf)
+```
+
+```{r}
+# INVERTEBRATE COMMUNITY COMPOSITION
+# 2025–2026, all valid surveys
+# Excludes HALRUF and HALKAM
+# No treatment factor
+
+#Average survey counts within each block and date
+
+invert_comm_block_date <- invert_sitewide %>%
+  group_by(
+    site, year, date, plot_number
+  ) %>%
+  summarise(
+    across(
+      all_of(invert_vars_used),
+      mean
+    ),
+    n_surveys = n_distinct(survey_id),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_inverts = rowSums(
+      pick(all_of(invert_vars_used))
+    )
+  )
+
+#Calculate composition among invertebrate-positive block-dates
+
+invert_composition <- invert_comm_block_date %>%
+  filter(total_inverts > 0) %>%
+  pivot_longer(
+    cols = all_of(invert_vars_used),
+    names_to = "species",
+    values_to = "mean_count"
+  ) %>%
+  group_by(site, year, species) %>%
+  summarise(
+    mean_abundance = mean(mean_count),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year) %>%
+  mutate(
+    relative_abundance = 100 *
+      mean_abundance / sum(mean_abundance)
+  ) %>%
+  ungroup()
+
+# Define colors
+
+year_colors <- c(
+  "2025" = "#D55E00",
+  "2026" = "#0072B2"
+)
+
+#PLot
+make_invert_hurricane <- function(site_name) {
+
+  site_data <- invert_composition %>%
+    filter(site == site_name)
+
+  # Select the six most prominent species at this site
+  focal_species <- site_data %>%
+    group_by(species) %>%
+    summarise(
+      combined_share = sum(relative_abundance),
+      .groups = "drop"
+    ) %>%
+    slice_max(
+      combined_share,
+      n = 6,
+      with_ties = FALSE
+    ) %>%
+    pull(species)
+
+  plot_data <- site_data %>%
+    mutate(
+      species_plot = if_else(
+        species %in% focal_species,
+        species,
+        "Other"
+      )
+    ) %>%
+    group_by(year, species_plot) %>%
+    summarise(
+      relative_abundance = sum(relative_abundance),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      species_plot = factor(
+        species_plot,
+        levels = rev(c(focal_species, "Other"))
+      ),
+      plot_abundance = if_else(
+        year == "2025",
+        -relative_abundance,
+        relative_abundance
+      )
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) {
+    "Big River"
+  } else {
+    "Noyo"
+  }
+
+  ggplot(
+    plot_data,
+    aes(
+      x = plot_abundance,
+      y = species_plot,
+      fill = year
+    )
+  ) +
+    geom_vline(
+      xintercept = 0,
+      color = "black",
+      linewidth = 0.5
+    ) +
+    geom_col(
+      width = 0.7,
+      color = "black",
+      linewidth = 0.2
+    ) +
+    scale_fill_manual(
+      values = year_colors,
+      name = "Year"
+    ) +
+    scale_x_continuous(
+      breaks = seq(-100, 100, 25),
+      labels = function(x) paste0(abs(x), "%")
+    ) +
+    coord_cartesian(
+      xlim = c(-105, 105)
+    ) +
+    labs(
+      title = paste(
+        "Invertebrate Community Composition —",
+        site_title
+      ),
+      subtitle = "Relative abundance among invertebrate-positive block-dates",
+      x = "Relative abundance (%)",
+      y = "Invertebrate group"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+invert_hurricane_big_river <- make_invert_hurricane(
+  "big_river"
+)
+
+invert_hurricane_noyo <- make_invert_hurricane(
+  "noyo"
+)
+
+print(invert_hurricane_big_river)
+print(invert_hurricane_noyo)
+```
+
+```{r}
+#Calculate invert richness
+invert_richness_sitewide <- invert_sitewide %>%
+  prepare_integrated() %>%
+  mutate(
+    invert_richness = rowSums(
+      as.matrix(pick(all_of(invert_vars_used))) > 0
+    )
+  )
+
+invert_richness_block_date <- invert_richness_sitewide %>%
+  group_by(site, year, date, plot_number) %>%
+  summarise(
+    mean_richness = mean(invert_richness),
+    .groups = "drop"
+  ) %>%
+  mutate(month = as.integer(format(date, "%m")))
+
+invert_richness_block_month <- invert_richness_block_date %>%
+  group_by(site, year, month, plot_number) %>%
+  summarise(
+    block_richness = mean(mean_richness),
+    .groups = "drop"
+  )
+
+invert_richness_month_summary <- invert_richness_block_month %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_blocks = n(),
+    se_richness = sd(block_richness) / sqrt(n()),
+    mean_richness = mean(block_richness),
+    .groups = "drop"
+  )
+
+invert_richness_year <- invert_richness_block_month %>%
+  group_by(site, year, plot_number) %>%
+  summarise(
+    block_richness = mean(block_richness),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year) %>%
+  summarise(
+    n_blocks = n(),
+    se_richness = sd(block_richness) / sqrt(n()),
+    mean_richness = mean(block_richness),
+    .groups = "drop"
+  )
+
+print(invert_richness_year, n = Inf)
+print(invert_richness_month_summary, n = Inf)
+```
+
+```{r}
+#Plot
+make_invert_richness_plot <- function(site_name) {
+
+  plot_data <- invert_richness_month_summary %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026))
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = month,
+      y = mean_richness,
+      color = year,
+      group = year
+    )
+  ) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2.8) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(0, mean_richness - se_richness),
+        ymax = mean_richness + se_richness
+      ),
+      width = 0.15,
+      linewidth = 0.5
+    ) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    coord_cartesian(ylim = c(0, NA)) +
+    labs(
+      title = paste(
+        "Invertebrate Taxon Richness —",
+        site_title
+      ),
+      x = "Month",
+      y = "Mean invertebrate taxa per survey",
+      color = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+invert_richness_big_river <- make_invert_richness_plot("big_river")
+invert_richness_noyo <- make_invert_richness_plot("noyo")
+
+print(invert_richness_big_river)
+print(invert_richness_noyo)
+```
+
+```{r}
+#Test invert richness
+invert_richness_model <- invert_richness_sitewide %>%
+  mutate(
+    site = factor(site, levels = c("big_river", "noyo")),
+    year = factor(year, levels = c(2025, 2026)),
+    month = factor(format(date, "%m")),
+    site_year_block = interaction(
+      site, year, plot_number, drop = TRUE
+    ),
+    site_date = interaction(site, date, drop = TRUE)
+  )
+
+invert_rich_add <- glmmTMB(
+  invert_richness ~ site + year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  family = poisson,
+  data = invert_richness_model
+)
+
+invert_rich_int <- glmmTMB(
+  invert_richness ~ site * year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  family = poisson,
+  data = invert_richness_model
+)
+
+anova(invert_rich_add, invert_rich_int)
+summary(invert_rich_int)
+
+invert_rich_int$fit$convergence
+invert_rich_int$sdr$pdHess
+
+set.seed(123)
+
+invert_rich_res <- DHARMa::simulateResiduals(
+  invert_rich_int,
+  n = 1000
+)
+
+plot(invert_rich_res)
+
+DHARMa::testUniformity(invert_rich_res)
+DHARMa::testDispersion(invert_rich_res)
+DHARMa::testZeroInflation(invert_rich_res)
+```
+
+```{r}
+#Conway-maxwell-poisson model to accommodate underdispersion
+invert_rich_add2 <- glmmTMB(
+  invert_richness ~ site + year + month +
+    (1 | site_year_block),
+  family = compois(),
+  data = invert_richness_model
+)
+
+invert_rich_int2 <- glmmTMB(
+  invert_richness ~ site * year + month +
+    (1 | site_year_block),
+  family = compois(),
+  data = invert_richness_model
+)
+
+anova(invert_rich_add2, invert_rich_int2)
+
+summary(invert_rich_add2)
+
+invert_rich_add2$fit$convergence
+invert_rich_add2$sdr$pdHess
+
+set.seed(123)
+
+invert_rich_res2 <- DHARMa::simulateResiduals(
+  invert_rich_add2,
+  n = 1000
+)
+
+DHARMa::testUniformity(invert_rich_res2)
+DHARMa::testDispersion(invert_rich_res2)
+DHARMa::testZeroInflation(invert_rich_res2)
+```
+
+```{r}
+#confidence intervals for main effects
+summary(
+  contrast(
+    emmeans(invert_rich_add2, ~ year),
+    method = "revpairwise"
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+summary(
+  contrast(
+    emmeans(invert_rich_add2, ~ site),
+    method = "revpairwise"
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+```
+
+##GRAZERS
+```{r}
+# All valid surveys, no treatment distinction
+# Includes urchins, Tegula, and abalone
+
+library(tidyverse)
+library(lubridate)
+
+grazer_sitewide <- grazer_2025_2026 %>%
+  mutate(
+    date = as.Date(date),
+    year = as.integer(year),
+    site = str_replace_all(
+      str_to_lower(str_trim(site)), " ", "_"
+    ),
+    plot_number = as.integer(
+      str_extract(as.character(arkev_unit), "\\d+")
+    )
+  ) %>%
+  filter(
+    year %in% c(2025, 2026),
+    site %in% c("big_river", "noyo"),
+    !is.na(date),
+    !is.na(plot_number),
+    if_all(all_of(grazers), ~ !is.na(.x))
+  ) %>%
+  mutate(
+    month = month(date),
+    grazer_total = rowSums(pick(all_of(grazers))),
+    grazer_present = as.integer(grazer_total > 0),
+    grazer_density = grazer_total / pi
+  )
+
+# Annual distribution and survey coverage
+
+grazer_distribution <- grazer_sitewide %>%
+  group_by(site, year) %>%
+  summarise(
+    n_surveys = n_distinct(survey_id),
+    n_blocks = n_distinct(plot_number),
+    n_with_grazers = sum(grazer_present),
+    n_without_grazers = sum(!grazer_present),
+    pct_with_grazers = 100 * mean(grazer_present),
+    mean_count = mean(grazer_total),
+    median_count = median(grazer_total),
+    variance_count = var(grazer_total),
+    mean_density = mean(grazer_density),
+    .groups = "drop"
+  )
+
+print(grazer_distribution, n = Inf)
+
+# Average all subplots within each block and date
+
+grazer_block_date <- grazer_sitewide %>%
+  group_by(site, year, month, date, plot_number) %>%
+  summarise(
+    block_date_density = mean(grazer_density),
+    block_date_occurrence = mean(grazer_present),
+    n_surveys = n_distinct(survey_id),
+    .groups = "drop"
+  )
+
+# Average dates within blocks and months
+
+grazer_block_month <- grazer_block_date %>%
+  group_by(site, year, month, plot_number) %>%
+  summarise(
+    block_month_density = mean(block_date_density),
+    block_month_occurrence = mean(block_date_occurrence),
+    n_surveys = sum(n_surveys),
+    .groups = "drop"
+  )
+
+# Monthly site-wide summaries
+
+grazer_month_summary <- grazer_block_month %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_blocks = n(),
+    n_surveys = sum(n_surveys),
+
+    mean_density = mean(block_month_density),
+    se_density = if (n() > 1) {
+      sd(block_month_density) / sqrt(n())
+    } else {
+      NA_real_
+    },
+
+    mean_occurrence = 100 * mean(block_month_occurrence),
+    se_occurrence = if (n() > 1) {
+      100 * sd(block_month_occurrence) / sqrt(n())
+    } else {
+      NA_real_
+    },
+
+    .groups = "drop"
+  )
+
+print(grazer_month_summary, n = Inf)
+```
+
+```{r}
+# IDENTIFY ZERO-GRAZER SURVEYS
+# Inspect their locations, dates, and original records
+
+# 1. Extract every zero-grazer survey
+
+grazer_zero_surveys <- grazer_sitewide %>%
+  filter(grazer_total == 0) %>%
+  select(
+    survey_id,
+    year,
+    site,
+    date,
+    plot_type,
+    arkev_unit,
+    plot_number,
+    all_of(grazers)
+  ) %>%
+  arrange(site, year, date, arkev_unit)
+
+# 2. Summarize where the zeros occur
+
+grazer_zero_surveys %>%
+  count(
+    site, year, date, plot_type,
+    name = "n_zero_surveys"
+  ) %>%
+  print(n = Inf)
+
+# 3. Display every zero-grazer survey
+
+grazer_zero_surveys %>%
+  print(n = Inf, width = Inf)
+
+
+# 4. Inspect original 2025 survey records
+# Includes urchins, Tegula, and abalone source records
+
+grazer_zeros_2025_raw <- surveys_2025 %>%
+  semi_join(
+    grazer_zero_surveys %>%
+      filter(year == 2025) %>%
+      select(survey_id),
+    by = "survey_id"
+  ) %>%
+  filter(
+    data_type %in% c("urchins", "tegula", "inverts")
+  ) %>%
+  select(
+    any_of(c(
+      "survey_id",
+      "date",
+      "site",
+      "arkev_unit",
+      "data_type",
+      "species_code",
+      "size_cm",
+      "count",
+      "count_num",
+      "notes"
+    ))
+  ) %>%
+  arrange(survey_id, data_type)
+
+grazer_zeros_2025_raw %>%
+  print(n = Inf, width = Inf)
+
+
+# 5. Inspect original 2026 grazer observations
+
+grazer_zeros_2026_raw <- ki %>%
+  semi_join(
+    grazer_zero_surveys %>%
+      filter(year == 2026) %>%
+      select(survey_id),
+    by = "survey_id"
+  ) %>%
+  select(
+    any_of(c(
+      "survey_id",
+      "date",
+      "site",
+      "plot_type",
+      "arkev_unit"
+    )),
+    all_of(grazers)
+  )
+
+grazer_zeros_2026_raw %>%
+  print(n = Inf, width = Inf)
+```
+
+
+```{r}
+# GRAZER ABUNDANCE: Full 2025–2026 dataset
+# All valid surveys, no treatment factor
+
+grazer_model_full <- grazer_sitewide %>%
+  mutate(
+    site = factor(
+      site,
+      levels = c("big_river", "noyo")
+    ),
+    year = factor(
+      year,
+      levels = c(2025, 2026)
+    ),
+    month = factor(month),
+
+    site_year_block = interaction(
+      site, year, plot_number,
+      drop = TRUE
+    ),
+
+    site_date = interaction(
+      site, date,
+      drop = TRUE
+    )
+  )
+
+# Additive model
+grazer_count_full_add <- glmmTMB(
+  grazer_total ~ site + year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = grazer_model_full,
+  family = nbinom2
+)
+
+# Interaction model
+grazer_count_full_int <- glmmTMB(
+  grazer_total ~ site * year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  data = grazer_model_full,
+  family = nbinom2
+)
+
+# Model results
+summary(grazer_count_full_int)
+
+anova(
+  grazer_count_full_add,
+  grazer_count_full_int
+)
+
+# Convergence checks
+grazer_count_full_int$fit$convergence
+grazer_count_full_int$sdr$pdHess
+
+# Random-effect variances
+VarCorr(grazer_count_full_int)
+```
+
+```{r}
+library(emmeans)
+library(DHARMa)
+
+# GRAZER ABUNDANCE: Full-season additive model
+# All valid surveys, no treatment factor
+
+# Model summary
+summary(grazer_count_full_add)
+
+# Overall year comparison: 2026 / 2025
+grazer_year_results <- emmeans(
+  grazer_count_full_add,
+  ~ year
+) %>%
+  contrast(method = "revpairwise") %>%
+  summary(
+    type = "response",
+    infer = c(TRUE, TRUE)
+  )
+
+print(grazer_year_results)
+
+# Overall site comparison: Noyo / Big River
+grazer_site_results <- emmeans(
+  grazer_count_full_add,
+  ~ site
+) %>%
+  contrast(method = "revpairwise") %>%
+  summary(
+    type = "response",
+    infer = c(TRUE, TRUE)
+  )
+
+print(grazer_site_results)
+
+# Residual diagnostics
+set.seed(123)
+
+grazer_count_res <- simulateResiduals(
+  fittedModel = grazer_count_full_add,
+  n = 1000
+)
+
+plot(grazer_count_res)
+
+testUniformity(grazer_count_res)
+testDispersion(grazer_count_res)
+testZeroInflation(grazer_count_res)
+testOutliers(grazer_count_res)
+```
+
+```{r}
+# GRAZER ABUNDANCE: Zero-inflated negative binomial
+# Full 2025–2026 dataset
+# All valid surveys, no treatment factor
+
+library(glmmTMB)
+library(DHARMa)
+
+# Additive model
+grazer_count_zi_add <- glmmTMB(
+  grazer_total ~ site + year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  ziformula = ~ 1,
+  family = nbinom2,
+  data = grazer_model_full
+)
+
+# Interaction model
+grazer_count_zi_int <- glmmTMB(
+  grazer_total ~ site * year + month +
+    (1 | site_year_block) +
+    (1 | site_date),
+  ziformula = ~ 1,
+  family = nbinom2,
+  data = grazer_model_full
+)
+
+# Compare model fit
+AIC(
+  grazer_count_full_add,
+  grazer_count_zi_add,
+  grazer_count_zi_int
+)
+
+# Test site × year interaction
+anova(
+  grazer_count_zi_add,
+  grazer_count_zi_int
+)
+
+# Inspect zero-inflated model
+summary(grazer_count_zi_add)
+
+# Check convergence
+grazer_count_zi_add$fit$convergence
+grazer_count_zi_add$sdr$pdHess
+
+grazer_count_zi_int$fit$convergence
+grazer_count_zi_int$sdr$pdHess
+
+# Residual diagnostics for additive model
+set.seed(123)
+
+grazer_zi_res <- simulateResiduals(
+  fittedModel = grazer_count_zi_add,
+  n = 1000
+)
+
+plot(grazer_zi_res)
+
+testUniformity(grazer_zi_res)
+testDispersion(grazer_zi_res)
+testZeroInflation(grazer_zi_res)
+
+# Bootstrap test for extreme observations
+testOutliers(
+  grazer_zi_res,
+  type = "bootstrap"
+)
+```
+
+```{r}
+library(DHARMa)
+library(emmeans)
+
+# GRAZERS: Final diagnostic checks and contrasts
+# Full 2025–2026 dataset
+# No treatment factor
+
+# 1. Examine residual quantile patterns
+testQuantiles(
+  grazer_zi_res,
+  plot = TRUE
+)
+
+# 2. Check residuals by site
+testCategorical(
+  grazer_zi_res,
+  catPred = grazer_model_full$site
+)
+
+# 3. Check residuals by year
+testCategorical(
+  grazer_zi_res,
+  catPred = grazer_model_full$year
+)
+
+# 4. Check residuals by month
+testCategorical(
+  grazer_zi_res,
+  catPred = grazer_model_full$month
+)
+
+# 5. Year effect with 95% confidence interval
+grazer_year_contrast <- emmeans(
+  grazer_count_zi_add,
+  ~ year,
+  component = "cond"
+) %>%
+  contrast(method = "revpairwise")
+
+summary(
+  grazer_year_contrast,
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+# 6. Site effect with 95% confidence interval
+grazer_site_contrast <- emmeans(
+  grazer_count_zi_add,
+  ~ site,
+  component = "cond"
+) %>%
+  contrast(method = "revpairwise")
+
+summary(
+  grazer_site_contrast,
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+```
+
+```{r}
+# GRAZER COMMUNITY COMPOSITION: 2025–2026
+# All valid surveys, no treatment distinction
+
+#Average grazer counts within each block and date
+
+grazer_comm_block_date <- grazer_sitewide %>%
+  group_by(site, year, date, plot_number) %>%
+  summarise(
+    across(all_of(grazers), mean),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_grazers = rowSums(
+      pick(all_of(grazers))
+    )
+  )
+
+#Calculate relative composition among positive block-dates
+grazer_composition <- grazer_comm_block_date %>%
+  filter(total_grazers > 0) %>%
+  pivot_longer(
+    cols = all_of(grazers),
+    names_to = "species",
+    values_to = "mean_count"
+  ) %>%
+  group_by(site, year, species) %>%
+  summarise(
+    mean_abundance = mean(mean_count),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year) %>%
+  mutate(
+    relative_abundance = 100 *
+      mean_abundance / sum(mean_abundance)
+  ) %>%
+  ungroup()
+
+#Calculate absolute density for the labels
+grazer_density_labels <- grazer_comm_block_date %>%
+  pivot_longer(
+    cols = all_of(grazers),
+    names_to = "species",
+    values_to = "mean_count"
+  ) %>%
+  group_by(site, year, species) %>%
+  summarise(
+    mean_density = mean(mean_count) / pi,
+    .groups = "drop"
+  )
+
+# Combine density with relative abundance
+grazer_composition_labeled <- grazer_composition %>%
+  left_join(
+    grazer_density_labels,
+    by = c("site", "year", "species")
+  ) %>%
+  mutate(
+    density_label = case_when(
+      mean_density == 0 ~ "",
+      mean_density < 0.01 ~ sprintf("%.3f", mean_density),
+      TRUE ~ sprintf("%.2f", mean_density)
+    )
+  )
+
+#Updated hurricane plot function
+make_grazer_hurricane <- function(site_name) {
+
+  plot_data <- grazer_composition_labeled %>%
+    filter(site == site_name)
+
+  species_order <- plot_data %>%
+    group_by(species) %>%
+    summarise(
+      combined_share = sum(relative_abundance),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(combined_share)) %>%
+    pull(species)
+
+  plot_data <- plot_data %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      species = factor(species, levels = rev(species_order)),
+      plot_abundance = if_else(
+        year == "2025",
+        -relative_abundance,
+        relative_abundance
+      ),
+      label_x = if_else(
+        year == "2025",
+        plot_abundance - 2,
+        plot_abundance + 2
+      ),
+      label_hjust = if_else(year == "2025", 1, 0)
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(x = plot_abundance, y = species, fill = year)
+  ) +
+    geom_vline(
+      xintercept = 0,
+      color = "black",
+      linewidth = 0.5
+    ) +
+    geom_col(
+      width = 0.7,
+      color = "black",
+      linewidth = 0.2
+    ) +
+    geom_text(
+      aes(
+        x = label_x,
+        label = density_label,
+        hjust = label_hjust
+      ),
+      size = 3.3,
+      color = "black"
+    ) +
+    scale_fill_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      ),
+      name = "Year"
+    ) +
+    scale_x_continuous(
+      breaks = seq(-100, 100, 25),
+      labels = function(x) paste0(abs(x), "%")
+    ) +
+    scale_y_discrete(
+      labels = c(
+        "purple_urchins_<2cm" = "Purple urchins <2 cm",
+        "purple_urchins_>2cm" = "Purple urchins >2 cm",
+        "red_urchins" = "Red urchins",
+        "tegula" = "Tegula",
+        "HALRUF" = "Red abalone",
+        "HALKAM" = "Pinto abalone"
+      )
+    ) +
+    coord_cartesian(xlim = c(-115, 115)) +
+    labs(
+      title = paste("Grazer Community —", site_title),
+      x = "Relative abundance (%)",
+      y = "Grazer group"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+#Recreate both figures
+
+grazer_hurricane_big_river <- make_grazer_hurricane("big_river")
+grazer_hurricane_noyo <- make_grazer_hurricane("noyo")
+
+print(grazer_hurricane_big_river)
+print(grazer_hurricane_noyo)
+```
+
+```{r}
+# GRAZER DENSITY: 2025 vs 2026
+# All valid surveys, no treatment distinction
+
+# Calculate mean density across block-dates
+# Includes block-dates with zero grazers
+
+grazer_species_density <- grazer_comm_block_date %>%
+  pivot_longer(
+    cols = all_of(grazers),
+    names_to = "species",
+    values_to = "mean_count"
+  ) %>%
+  group_by(site, year, species) %>%
+  summarise(
+    mean_density = mean(mean_count) / pi,
+    .groups = "drop"
+  )
+
+# Species ordering (same for both sites)
+species_order <- grazer_species_density %>%
+  group_by(species) %>%
+  summarise(
+    total_density = sum(mean_density),
+    .groups = "drop"
+  ) %>%
+  arrange(total_density) %>%
+  pull(species)
+
+# Labels
+grazer_labels <- c(
+  "purple_urchins_<2cm" = "Purple urchins <2 cm",
+  "purple_urchins_>2cm" = "Purple urchins >2 cm",
+  "red_urchins" = "Red urchins",
+  "tegula" = "Tegula",
+  "HALRUF" = "Red abalone",
+  "HALKAM" = "Pinto abalone"
+)
+
+# Same horizontal scale for both sites
+max_density <- max(grazer_species_density$mean_density)
+
+# Plot function
+make_grazer_density_hurricane <- function(site_name) {
+
+  plot_data <- grazer_species_density %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      species = factor(species, levels = species_order),
+      plot_density = if_else(
+        year == "2025",
+        -mean_density,
+        mean_density
+      )
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = plot_density,
+      y = species,
+      fill = year
+    )
+  ) +
+    geom_vline(
+      xintercept = 0,
+      color = "black",
+      linewidth = 0.5
+    ) +
+    geom_col(
+      width = 0.7,
+      color = "black",
+      linewidth = 0.2
+    ) +
+    geom_text(
+      aes(
+        label = if_else(
+          mean_density >= 0.01,
+          sprintf("%.2f", mean_density),
+          ""
+        ),
+        hjust = if_else(year == "2025", 1.1, -0.1)
+      ),
+      size = 3.4
+    ) +
+    scale_fill_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      ),
+      name = "Year"
+    ) +
+    scale_x_continuous(
+      labels = function(x) abs(x)
+    ) +
+    scale_y_discrete(
+      labels = grazer_labels
+    ) +
+    coord_cartesian(
+      xlim = c(-max_density * 1.25,
+                max_density * 1.25)
+    ) +
+    labs(
+      title = paste(
+        "Grazer Density —",
+        site_title
+      ),
+      x = expression("Mean density (individuals/m"^2*")"),
+      y = "Grazer group"
+    ) +
+    theme_classic(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+# Separate density figures
+
+grazer_density_big_river <- make_grazer_density_hurricane(
+  "big_river"
+)
+
+grazer_density_noyo <- make_grazer_density_hurricane(
+  "noyo"
+)
+
+print(grazer_density_big_river)
+print(grazer_density_noyo)
+```
+
+
+##COVER
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+# Prepare benthic cover data
+cover_sitewide <- cover_compare %>%
+  mutate(
+    date = as.Date(date),
+    year = as.integer(as.character(year)),
+    site = str_replace_all(
+      str_to_lower(str_trim(site)), " ", "_"
+    ),
+    month = as.integer(format(date, "%m")),
+    plot_number = as.integer(
+      str_extract(as.character(arkev_unit), "\\d+")
+    )
+  ) %>%
+  filter(
+    year %in% c(2025, 2026),
+    site %in% c("big_river", "noyo"),
+    !is.na(date),
+    !is.na(plot_number)
+  )
+
+# Annual coverage and descriptive statistics
+cover_distribution <- cover_sitewide %>%
+  group_by(site, year) %>%
+  summarise(
+    n_surveys = n(),
+    n_valid_algal = sum(!is.na(algal_cover)),
+    n_blocks = n_distinct(
+      plot_number[!is.na(algal_cover)]
+    ),
+    n_missing_sand = sum(is.na(SAND)),
+    mean_algal = mean(algal_cover, na.rm = TRUE),
+    median_algal = median(algal_cover, na.rm = TRUE),
+    sd_algal = sd(algal_cover, na.rm = TRUE),
+    pct_zero_algal = 100 * mean(
+      algal_cover[!is.na(algal_cover)] == 0
+    ),
+    mean_CCA = mean(CCA, na.rm = TRUE),
+    mean_ACA = mean(ACA, na.rm = TRUE),
+    mean_ER = mean(ER, na.rm = TRUE),
+    mean_BR = mean(BR, na.rm = TRUE),
+    mean_turf = mean(turf, na.rm = TRUE),
+    mean_FLESHY = mean(FLESHY, na.rm = TRUE),
+    mean_SCUM = mean(SCUM, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(cover_distribution, width = Inf)
+
+
+# Block-date averages for seasonal comparisons
+cover_block_date <- cover_sitewide %>%
+  filter(!is.na(algal_cover)) %>%
+  group_by(site, year, date, month, plot_number) %>%
+  summarise(
+    mean_algal = mean(algal_cover),
+    n_surveys = n_distinct(survey_id),
+    .groups = "drop"
+  )
+
+# Average repeated dates within each block-month
+cover_block_month <- cover_block_date %>%
+  group_by(site, year, month, plot_number) %>%
+  summarise(
+    mean_algal = mean(mean_algal),
+    .groups = "drop"
+  )
+
+# Monthly site-wide means ± SE across blocks
+cover_month_summary <- cover_block_month %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_blocks = n(),
+    mean_algal = mean(mean_algal),
+    se_algal = sd(mean_algal) / sqrt(n_blocks),
+    .groups = "drop"
+  )
+
+print(cover_month_summary, n = Inf)
+```
+
+```{r}
+# Recalculate monthly site-wide means and SE
+
+cover_month_summary <- cover_block_month %>%
+  group_by(site, year, month) %>%
+  summarise(
+    n_blocks = n_distinct(plot_number),
+    se_algal = sd(mean_algal) / sqrt(n()),
+    mean_algal = mean(mean_algal),
+    .groups = "drop"
+  )
+
+print(cover_month_summary, n = Inf)
+
+
+# Seasonal algal cover figures
+library(ggplot2)
+
+make_cover_plot <- function(site_name) {
+
+  plot_data <- cover_month_summary %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026))
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = month,
+      y = mean_algal,
+      color = year,
+      group = year
+    )
+  ) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2.8) +
+    geom_errorbar(
+      aes(
+        ymin = mean_algal - se_algal,
+        ymax = mean_algal + se_algal
+      ),
+      width = 0.15,
+      linewidth = 0.5
+    ) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    scale_y_continuous(
+      breaks = seq(0, 100, 20)
+    ) +
+    coord_cartesian(ylim = c(0, 100)) +
+    labs(
+      title = paste("Benthic Algal Cover —", site_title),
+      x = "Month",
+      y = "Mean benthic algal cover (%)",
+      color = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+cover_plot_big_river <- make_cover_plot("big_river")
+cover_plot_noyo <- make_cover_plot("noyo")
+
+print(cover_plot_big_river)
+print(cover_plot_noyo)
+```
+
+```{r}
+# Full-season algal cover model
+cover_model <- cover_block_month %>%
+  mutate(
+    site = factor(site, levels = c("big_river", "noyo")),
+    year = factor(year, levels = c(2025, 2026)),
+    month = factor(month),
+    site_year_block = interaction(
+      site, year, plot_number, drop = TRUE
+    )
+  )
+
+# Additive model
+cover_add <- lmer(
+  mean_algal ~ site + year + month +
+    (1 | site_year_block),
+  data = cover_model,
+  REML = FALSE
+)
+
+# Site × year interaction model
+cover_int <- lmer(
+  mean_algal ~ site * year + month +
+    (1 | site_year_block),
+  data = cover_model,
+  REML = FALSE
+)
+
+# Compare models
+anova(cover_add, cover_int)
+
+# Inspect interaction model
+summary(cover_int)
+
+# Basic residual checks
+plot(cover_int)
+qqnorm(resid(cover_int))
+qqline(resid(cover_int))
+```
+
+```{r}
+# Full-season: 2026 vs 2025 within each site
+cover_year_emm <- emmeans(
+  cover_int,
+  ~ year | site
+)
+
+summary(
+  pairs(cover_year_emm, reverse = TRUE),
+  infer = c(TRUE, TRUE)
+)
+
+
+# July–August sensitivity analysis
+cover_shared <- cover_model %>%
+  filter(month %in% c("7", "8")) %>%
+  droplevels()
+
+cover_shared_add <- lmer(
+  mean_algal ~ site + year + month +
+    (1 | site_year_block),
+  data = cover_shared,
+  REML = FALSE
+)
+
+cover_shared_int <- lmer(
+  mean_algal ~ site * year + month +
+    (1 | site_year_block),
+  data = cover_shared,
+  REML = FALSE
+)
+
+# Does the interaction persist?
+anova(cover_shared_add, cover_shared_int)
+
+# Compare years within sites
+summary(
+  pairs(
+    emmeans(cover_shared_int, ~ year | site),
+    reverse = TRUE
+  ),
+  infer = c(TRUE, TRUE)
+)
+```
+
+```{r}
+# BENTHIC COVER: 2025 vs 2026
+# All valid surveys, no treatment distinction
+
+cover_groups <- c(
+  "CCA", "ACA", "ER", "BR",
+  "turf", "FLESHY", "SCUM"
+)
+
+# Calculate mean cover by block-date, then site and year
+cover_category_summary <- cover_sitewide %>%
+  select(
+    site, year, date, plot_number,
+    all_of(cover_groups)
+  ) %>%
+  pivot_longer(
+    cols = all_of(cover_groups),
+    names_to = "category",
+    values_to = "cover"
+  ) %>%
+  filter(!is.na(cover)) %>%
+  group_by(site, year, date, plot_number, category) %>%
+  summarise(
+    block_cover = mean(cover),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, category) %>%
+  summarise(
+    mean_cover = mean(block_cover),
+    .groups = "drop"
+  )
+
+# Consistent category ordering across sites
+category_order <- cover_category_summary %>%
+  group_by(category) %>%
+  summarise(
+    total_cover = sum(mean_cover),
+    .groups = "drop"
+  ) %>%
+  arrange(total_cover) %>%
+  pull(category)
+
+cover_labels <- c(
+  "CCA" = "Crustose coralline algae",
+  "ACA" = "Articulated coralline algae",
+  "ER" = "ER",
+  "BR" = "BR",
+  "turf" = "Turf algae",
+  "FLESHY" = "Fleshy algae",
+  "SCUM" = "Scum"
+)
+
+make_cover_hurricane <- function(site_name) {
+
+  plot_data <- cover_category_summary %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      category = factor(
+        category,
+        levels = category_order
+      ),
+      plot_cover = if_else(
+        year == "2025",
+        -mean_cover,
+        mean_cover
+      ),
+      label_x = if_else(
+        year == "2025",
+        plot_cover - 2,
+        plot_cover + 2
+      ),
+      label_hjust = if_else(
+        year == "2025", 1, 0
+      )
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = plot_cover,
+      y = category,
+      fill = year
+    )
+  ) +
+    geom_vline(
+      xintercept = 0,
+      color = "black",
+      linewidth = 0.5
+    ) +
+    geom_col(
+      width = 0.7,
+      color = "black",
+      linewidth = 0.2
+    ) +
+    geom_text(
+      aes(
+        x = label_x,
+        label = sprintf("%.1f", mean_cover),
+        hjust = label_hjust
+      ),
+      size = 3.3
+    ) +
+    scale_fill_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      ),
+      name = "Year"
+    ) +
+    scale_x_continuous(
+      breaks = seq(-100, 100, 25),
+      labels = function(x) paste0(abs(x), "%")
+    ) +
+    scale_y_discrete(
+      labels = cover_labels
+    ) +
+    coord_cartesian(
+      xlim = c(-115, 115)
+    ) +
+    labs(
+      title = paste(
+        "Benthic Cover —",
+        site_title
+      ),
+      x = "Mean cover (%)",
+      y = "Cover category"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+cover_hurricane_big_river <- make_cover_hurricane(
+  "big_river"
+)
+
+cover_hurricane_noyo <- make_cover_hurricane(
+  "noyo"
+)
+
+print(cover_hurricane_big_river)
+print(cover_hurricane_noyo)
+```
+
+```{r}
+cover_groups <- c(
+  "CCA", "ACA", "ER", "BR",
+  "turf", "FLESHY", "SCUM"
+)
+
+# 1. Keep surveys with complete cover-group measurements
+cover_comm <- cover_sitewide %>%
+  filter(
+    if_all(all_of(cover_groups), ~ !is.na(.x))
+  )
+
+# Check how many surveys remain
+cover_comm %>%
+  count(site, year, name = "n_surveys") %>%
+  print()
+
+
+# 2. Average subplots within each block-date,
+# then dates within each block-year
+cover_block_year <- cover_comm %>%
+  group_by(site, year, date, plot_number) %>%
+  summarise(
+    across(all_of(cover_groups), mean),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, plot_number) %>%
+  summarise(
+    across(all_of(cover_groups), mean),
+    .groups = "drop"
+  )
+
+# Verify independent block-year units
+cover_block_year %>%
+  count(site, year, name = "n_blocks") %>%
+  print()
+
+
+# 3. PERMANOVA and dispersion tests by site
+for (site_name in c("big_river", "noyo")) {
+
+  cat("\n========================\n")
+  cat("SITE:", site_name, "\n")
+  cat("========================\n")
+
+  site_data <- cover_block_year %>%
+    filter(site == site_name) %>%
+    mutate(year = factor(year))
+
+  # Community matrix
+  cover_matrix <- as.matrix(
+    site_data[, cover_groups]
+  )
+
+  # Hellinger transformation
+  # Standardizes each block-year's cover composition
+  cover_hel <- decostand(
+    cover_matrix,
+    method = "hellinger"
+  )
+
+  # Euclidean distances on transformed community data
+  cover_dist <- dist(cover_hel)
+
+  # PERMANOVA
+  cat("\nPERMANOVA:\n")
+
+  print(
+    adonis2(
+      cover_dist ~ year,
+      data = site_data,
+      permutations = 9999
+    )
+  )
+
+  # Homogeneity of multivariate dispersion
+  cover_disp <- betadisper(
+    cover_dist,
+    group = site_data$year
+  )
+
+  cat("\nDISPERSION TEST:\n")
+
+  print(
+    permutest(
+      cover_disp,
+      permutations = 9999
+    )
+  )
+}
+```
+
+```{r}
+# BIG RIVER: Paired benthic composition analysis
+# Only blocks 1–7 represent matching locations
+
+br_cover_paired <- cover_block_year %>%
+  filter(
+    site == "big_river",
+    plot_number %in% 1:7
+  ) %>%
+  arrange(plot_number, year) %>%
+  mutate(year = factor(year))
+
+# Confirm each block has one observation per year
+br_cover_paired %>%
+  count(plot_number, year) %>%
+  print(n = Inf)
+
+# Hellinger-transformed community matrix
+br_cover_matrix <- br_cover_paired %>%
+  select(all_of(cover_groups)) %>%
+  as.matrix()
+
+br_cover_dist <- dist(
+  vegan::decostand(
+    br_cover_matrix,
+    method = "hellinger"
+  )
+)
+
+# PERMANOVA with permutations restricted within blocks
+set.seed(123)
+
+br_cover_permanova_paired <- vegan::adonis2(
+  br_cover_dist ~ year,
+  data = br_cover_paired,
+  permutations = 9999,
+  strata = br_cover_paired$plot_number
+)
+
+print(br_cover_permanova_paired)
+
+# Check multivariate dispersion
+br_cover_disp_paired <- vegan::betadisper(
+  br_cover_dist,
+  group = br_cover_paired$year
+)
+
+vegan::permutest(
+  br_cover_disp_paired,
+  permutations = 9999
+)
+```
+
+```{r}
+# Big River: Paired benthic cover PERMANOVA
+# Blocks 1–7 only
+
+br_cover_paired <- br_cover_paired %>%
+  mutate(block = factor(plot_number))
+
+set.seed(123)
+
+br_cover_permanova <- vegan::adonis2(
+  br_cover_dist ~ block + year,
+  data = br_cover_paired,
+  permutations = 9999,
+  strata = br_cover_paired$block,
+  by = "terms"
+)
+
+print(br_cover_permanova)
+```
+
+##FISH
+```{r}
+# Identify existing fish data objects
+
+fish_objects <- grep(
+  "fish",
+  ls(.GlobalEnv),
+  value = TRUE,
+  ignore.case = TRUE
+)
+
+print(fish_objects)
+
+# Show the dimensions and columns of available fish datasets
+for (obj in fish_objects) {
+  x <- get(obj, envir = .GlobalEnv)
+
+  if (is.data.frame(x)) {
+    cat("\n", obj, ":", nrow(x), "rows\n")
+    print(names(x))
+  }
+}
+```
+
+```{r}
+# Check which survey types were collected in 2025
+surveys_2025 %>%
+  count(data_type, sort = TRUE) %>%
+  print(n = Inf)
+
+# Check the 2026 fish observations
+fish_2026_check %>%
+  count(year, site, fish_location) %>%
+  print(n = Inf)
+
+# Check valid 2026 fish survey zones
+fish_zone_2026 %>%
+  count(site, fish_location, valid) %>%
+  print(n = Inf)
+```
+
+```{r}
+fish_zone_2025 <- surveys_2025 %>%
+  filter(data_type %in% c("fish_on", "fish_off")) %>%
+  mutate(
+    year = 2025L,
+    date = as.Date(date),
+    fish_location = data_type,
+    plot_number = as.integer(
+      str_extract(as.character(arkev_unit), "\\d+")
+    )
+  ) %>%
+  group_by(
+    year, site, date, survey_id,
+    plot_type, arkev_unit,
+    plot_number, fish_location
+  ) %>%
+  summarise(
+    fish_count = if (anyNA(count_num)) {
+      NA_real_
+    } else {
+      sum(count_num)
+    },
+    .groups = "drop"
+  ) %>%
+  mutate(
+    area_m2 = if_else(
+      fish_location == "fish_on",
+      pi,
+      3 * pi
+    ),
+    valid = !is.na(fish_count),
+    fish_density = fish_count / area_m2
   )
 
 
-##Kelp on ARKEV
-```{r}
-days_until_reproductive = mean((45+49+37+50)/4)
-days_until_reproductive
+fish_zone_both <- bind_rows(
+  fish_zone_2025 %>%
+    select(
+      year, site, date, plot_type,
+      arkev_unit, plot_number,
+      fish_location, valid,
+      fish_count, area_m2, fish_density
+    ),
+
+  fish_zone_2026 %>%
+    mutate(
+      year = 2026L,
+      area_m2 = if_else(
+        fish_location == "fish_on",
+        pi,
+        3 * pi
+      ),
+      fish_density = fish_count / area_m2
+    ) %>%
+    select(
+      year, site, date, plot_type,
+      arkev_unit, plot_number,
+      fish_location, valid,
+      fish_count, area_m2, fish_density
+    )
+) %>%
+  filter(
+    valid,
+    !is.na(fish_count),
+    fish_location %in% c("fish_on", "fish_off")
+  ) %>%
+  mutate(
+    month = as.integer(format(date, "%m"))
+  )
+
+
+fish_zone_both %>%
+  group_by(site, year, fish_location) %>%
+  summarise(
+    n_zones = n(),
+    n_blocks = n_distinct(plot_number),
+    area_m2 = first(area_m2),
+    mean_density = mean(fish_density),
+    median_density = median(fish_density),
+    pct_with_fish = 100 * mean(fish_count > 0),
+    .groups = "drop"
+  ) %>%
+  print(n = Inf)
 ```
+
+```{r}
+#Average fish density within each block-date
+fish_block_date_both <- fish_zone_both %>%
+  group_by(
+    site, year, date, month,
+    plot_number, fish_location
+  ) %>%
+  summarise(
+    mean_density = mean(fish_density),
+    .groups = "drop"
+  )
+
+#Average repeated dates within each block-month
+fish_month_block_both <- fish_block_date_both %>%
+  group_by(
+    site, year, month,
+    plot_number, fish_location
+  ) %>%
+  summarise(
+    block_density = mean(mean_density),
+    .groups = "drop"
+  )
+
+#Site-wide monthly means ± SE across blocks
+fish_month_summary_both <- fish_month_block_both %>%
+  group_by(site, year, month, fish_location) %>%
+  summarise(
+    n_blocks = n(),
+    se_density = sd(block_density) / sqrt(n()),
+    mean_density = mean(block_density),
+    .groups = "drop"
+  )
+
+print(fish_month_summary_both, n = Inf)
+
+
+#Seasonal plotting function
+make_fish_seasonal <- function(site_name) {
+
+  plot_data <- fish_month_summary_both %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      fish_location = factor(
+        fish_location,
+        levels = c("fish_on", "fish_off"),
+        labels = c("Fish on", "Fish off")
+      )
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = month,
+      y = mean_density,
+      color = year,
+      group = year
+    )
+  ) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2.7) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(0, mean_density - se_density),
+        ymax = mean_density + se_density
+      ),
+      width = 0.15,
+      linewidth = 0.5
+    ) +
+    facet_wrap(
+      ~ fish_location,
+      nrow = 1
+    ) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    scale_y_continuous(
+      limits = c(0, NA),
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    labs(
+      title = paste("Fish Density —", site_title),
+      x = "Month",
+      y = expression("Mean fish density (individuals/m"^2*")"),
+      color = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom",
+      strip.background = element_blank(),
+      strip.text = element_text(face = "bold")
+    )
+}
+
+
+fish_seasonal_big_river <- make_fish_seasonal("big_river")
+fish_seasonal_noyo <- make_fish_seasonal("noyo")
+
+print(fish_seasonal_big_river)
+print(fish_seasonal_noyo)
+```
+
+```{r}
+make_fish_seasonal_swapped <- function(site_name) {
+
+  plot_data <- fish_month_summary_both %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      fish_location = factor(
+        fish_location,
+        levels = c("fish_on", "fish_off"),
+        labels = c("Fish on", "Fish off")
+      )
+    )
+
+  site_title <- if (site_name == "big_river") "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = month,
+      y = mean_density,
+      color = fish_location,
+      group = fish_location
+    )
+  ) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2.7) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(0, mean_density - se_density),
+        ymax = mean_density + se_density
+      ),
+      width = 0.15,
+      linewidth = 0.5
+    ) +
+    facet_wrap(
+      ~ year,
+      nrow = 1
+    ) +
+    scale_color_manual(
+      values = c(
+        "Fish on" = "darkgreen",
+        "Fish off" = "lightblue"
+      )
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    scale_y_continuous(
+      limits = c(0, NA),
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    labs(
+      title = paste("Fish Density —", site_title),
+      x = "Month",
+      y = expression("Mean fish density (individuals/m"^2*")"),
+      color = NULL
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom",
+      strip.background = element_blank(),
+      strip.text = element_text(face = "bold")
+    )
+}
+
+fish_swapped_big_river <- make_fish_seasonal_swapped("big_river")
+fish_swapped_noyo <- make_fish_seasonal_swapped("noyo")
+
+print(fish_swapped_big_river)
+print(fish_swapped_noyo)
+```
+
+```{r}
+make_fish_seasonal_combined <- function(site_name) {
+
+  plot_data <- fish_month_summary_both %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      fish_location = factor(
+        fish_location,
+        levels = c("fish_on", "fish_off"),
+        labels = c("Fish on", "Fish off")
+      )
+    )
+
+  site_title <- if (site_name == "big_river") "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = month,
+      y = mean_density,
+      color = year,
+      linetype = fish_location,
+      shape = fish_location,
+      group = interaction(year, fish_location)
+    )
+  ) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2.6) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(0, mean_density - se_density),
+        ymax = mean_density + se_density
+      ),
+      width = 0.15,
+      linewidth = 0.5
+    ) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_linetype_manual(
+      values = c(
+        "Fish on" = "solid",
+        "Fish off" = "dashed"
+      )
+    ) +
+    scale_shape_manual(
+      values = c(
+        "Fish on" = 16,
+        "Fish off" = 17
+      )
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    scale_y_continuous(
+      limits = c(0, NA),
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    labs(
+      title = paste("Fish Density —", site_title),
+      x = "Month",
+      y = expression("Mean fish density (individuals/m"^2*")"),
+      color = "Year",
+      linetype = NULL,
+      shape = NULL
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+fish_combined_big_river <- make_fish_seasonal_combined("big_river")
+fish_combined_noyo <- make_fish_seasonal_combined("noyo")
+
+print(fish_combined_big_river)
+print(fish_combined_noyo)
+```
+
+```{r}
+# Positive fish observations from each year
+fish_species_2025 <- surveys_2025 %>%
+  filter(
+    data_type %in% c("fish_on", "fish_off"),
+    !is.na(count_num),
+    count_num > 0
+  ) %>%
+  transmute(
+    year = 2025L,
+    site,
+    fish_location = data_type,
+    species = species_code,
+    fish_count = count_num
+  )
+
+fish_species_2026 <- fish_2026_check %>%
+  filter(
+    fish_location %in% c("fish_on", "fish_off"),
+    !is.na(count_num),
+    count_num > 0
+  ) %>%
+  transmute(
+    year = 2026L,
+    site,
+    fish_location,
+    species,
+    fish_count = count_num
+  )
+
+# Compare species identifiers across years
+fish_species_check <- bind_rows(
+  fish_species_2025,
+  fish_species_2026
+)
+
+fish_species_check %>%
+  group_by(year, species) %>%
+  summarise(
+    total_fish = sum(fish_count),
+    .groups = "drop"
+  ) %>%
+  arrange(year, desc(total_fish)) %>%
+  print(n = Inf)
+
+# Identify largest individual fish-count observations
+fish_species_check %>%
+  group_by(year, site, fish_location, species) %>%
+  summarise(
+    total_fish = sum(fish_count),
+    max_single_record = max(fish_count),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(max_single_record)) %>%
+  slice_head(n = 15) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Combine positive fish observations from both years
+fish_species_records <- bind_rows(
+
+  surveys_2025 %>%
+    filter(
+      data_type %in% c("fish_on", "fish_off"),
+      !is.na(count_num),
+      count_num > 0
+    ) %>%
+    transmute(
+      year = 2025L,
+      site,
+      date = as.Date(date),
+      plot_type,
+      arkev_unit,
+      fish_location = data_type,
+      species = species_code,
+      fish_count = count_num
+    ),
+
+  fish_2026_check %>%
+    filter(
+      fish_location %in% c("fish_on", "fish_off"),
+      !is.na(count_num),
+      count_num > 0
+    ) %>%
+    transmute(
+      year = 2026L,
+      site,
+      date = as.Date(date),
+      plot_type,
+      arkev_unit,
+      fish_location,
+      species,
+      fish_count = count_num
+    )
+
+) %>%
+  mutate(
+    site = str_to_lower(str_trim(site)),
+    plot_type = str_to_lower(str_trim(plot_type)),
+    arkev_unit = str_to_upper(str_trim(arkev_unit)),
+    fish_location = str_to_lower(str_trim(fish_location))
+  )
+
+
+#Standardize valid survey-zone identifiers
+
+fish_valid_keys <- fish_zone_both %>%
+  mutate(
+    site = str_to_lower(str_trim(site)),
+    plot_type = str_to_lower(str_trim(plot_type)),
+    arkev_unit = str_to_upper(str_trim(arkev_unit)),
+    fish_location = str_to_lower(str_trim(fish_location))
+  ) %>%
+  distinct(
+    year, site, date, plot_type,
+    arkev_unit, fish_location
+  )
+
+
+# Keep species records from valid survey zones
+fish_species_records <- fish_species_records %>%
+  semi_join(
+    fish_valid_keys,
+    by = c(
+      "year", "site", "date", "plot_type",
+      "arkev_unit", "fish_location"
+    )
+  )
+
+
+# Check species totals against survey-zone totals
+fish_reconciliation <- fish_zone_both %>%
+  group_by(site, year, fish_location) %>%
+  summarise(
+    zone_total = sum(fish_count),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    fish_species_records %>%
+      group_by(site, year, fish_location) %>%
+      summarise(
+        species_total = sum(fish_count),
+        .groups = "drop"
+      ),
+    by = c("site", "year", "fish_location")
+  ) %>%
+  mutate(
+    species_total = coalesce(species_total, 0),
+    difference = zone_total - species_total
+  )
+
+print(fish_reconciliation, n = Inf)
+```
+
+```{r}
+# Build species counts for every valid fish survey zone
+fish_keys <- c(
+  "year", "site", "date", "plot_type",
+  "arkev_unit", "fish_location"
+)
+
+species_codes <- sort(unique(fish_species_records$species))
+
+fish_species_wide <- fish_species_records %>%
+  group_by(across(all_of(fish_keys)), species) %>%
+  summarise(
+    count = sum(fish_count),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = species,
+    values_from = count,
+    values_fill = 0
+  )
+
+fish_zone_species <- fish_zone_both %>%
+  mutate(
+    plot_type = stringr::str_to_lower(plot_type),
+    arkev_unit = stringr::str_to_upper(arkev_unit)
+  ) %>%
+  left_join(
+    fish_species_wide,
+    by = fish_keys,
+    relationship = "one-to-one"
+  ) %>%
+  mutate(
+    across(all_of(species_codes), ~ replace_na(.x, 0))
+  )
+
+# Confirm that species counts still match zone totals
+stopifnot(all(
+  abs(
+    rowSums(as.matrix(
+      fish_zone_species[, species_codes]
+    )) - fish_zone_species$fish_count
+  ) < 1e-8
+))
+
+
+# Calculate species-specific mean densities
+fish_species_block_date <- fish_zone_species %>%
+  group_by(
+    site, year, date, plot_number, fish_location
+  ) %>%
+  summarise(
+    across(all_of(species_codes), mean),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = all_of(species_codes),
+    names_to = "species",
+    values_to = "mean_count"
+  )
+
+fish_species_density <- fish_species_block_date %>%
+  group_by(site, year, fish_location, species) %>%
+  summarise(
+    mean_count = mean(mean_count),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    area_m2 = if_else(
+      fish_location == "fish_on",
+      pi,
+      3 * pi
+    ),
+    mean_density = mean_count / area_m2
+  ) %>%
+  select(site, year, fish_location, species, mean_density)
+
+
+# Keep the six dominant species at each site
+fish_top_species <- fish_species_density %>%
+  group_by(site, species) %>%
+  summarise(
+    total_density = sum(mean_density),
+    .groups = "drop"
+  ) %>%
+  group_by(site) %>%
+  slice_max(total_density, n = 6, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(is_top = TRUE)
+
+fish_composition <- fish_species_density %>%
+  left_join(
+    fish_top_species %>%
+      select(site, species, is_top),
+    by = c("site", "species")
+  ) %>%
+  mutate(
+    group = if_else(is.na(is_top), "Other", species)
+  ) %>%
+  group_by(site, year, fish_location, group) %>%
+  summarise(
+    mean_density = sum(mean_density),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, fish_location) %>%
+  mutate(
+    relative_abundance =
+      100 * mean_density / sum(mean_density)
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#Plot 
+make_fish_hurricane <- function(site_name) {
+
+  plot_data <- fish_composition %>%
+    filter(site == site_name)
+
+  species_order <- plot_data %>%
+    group_by(group) %>%
+    summarise(
+      total = sum(mean_density),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(total)) %>%
+    pull(group)
+
+  species_order <- c(
+    setdiff(species_order, "Other"),
+    "Other"
+  )
+
+  plot_data <- plot_data %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      fish_location = factor(
+        fish_location,
+        levels = c("fish_on", "fish_off"),
+        labels = c("Fish on", "Fish off")
+      ),
+      group = factor(group, levels = rev(species_order)),
+      plot_abundance = if_else(
+        year == "2025",
+        -relative_abundance,
+        relative_abundance
+      ),
+      label_x = if_else(
+        year == "2025",
+        plot_abundance - 2,
+        plot_abundance + 2
+      ),
+      label_hjust = if_else(year == "2025", 1, 0),
+      density_label = case_when(
+        mean_density == 0 ~ "",
+        mean_density < 0.01 ~ sprintf("%.3f", mean_density),
+        TRUE ~ sprintf("%.2f", mean_density)
+      )
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = plot_abundance,
+      y = group,
+      fill = year
+    )
+  ) +
+    geom_vline(xintercept = 0, linewidth = 0.5) +
+    geom_col(
+      width = 0.7,
+      color = "black",
+      linewidth = 0.2
+    ) +
+    geom_text(
+      aes(
+        x = label_x,
+        label = density_label,
+        hjust = label_hjust
+      ),
+      size = 3
+    ) +
+    facet_wrap(~ fish_location, nrow = 1) +
+    scale_fill_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_x_continuous(
+      breaks = seq(-100, 100, 50),
+      labels = function(x) paste0(abs(x), "%")
+    ) +
+    coord_cartesian(xlim = c(-120, 120)) +
+    labs(
+      title = paste("Fish Community —", site_title),
+      x = "Relative abundance (%)",
+      y = "Fish species",
+      fill = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom",
+      strip.background = element_blank(),
+      strip.text = element_text(face = "bold")
+    )
+}
+
+fish_hurricane_big_river <- make_fish_hurricane("big_river")
+fish_hurricane_noyo <- make_fish_hurricane("noyo")
+
+print(fish_hurricane_big_river)
+print(fish_hurricane_noyo)
+```
+```{r}
+# Prepare full-season fish data
+fish_model_data <- fish_zone_both %>%
+  mutate(
+    site = factor(site, levels = c("big_river", "noyo")),
+    year = factor(year, levels = c(2025, 2026)),
+    month = factor(month),
+
+    site_year_block = interaction(
+      site, year, plot_number,
+      drop = TRUE
+    ),
+
+    site_date = interaction(
+      site, date,
+      drop = TRUE
+    )
+  )
+
+# Fit models separately for fish-on and fish-off
+
+fish_nb_models <- list()
+
+for (zone in c("fish_on", "fish_off")) {
+
+  cat("\n========================\n")
+  cat("ZONE:", zone, "\n")
+  cat("========================\n")
+
+  zone_data <- fish_model_data %>%
+    filter(fish_location == zone) %>%
+    droplevels()
+
+  # Additive model
+  model_add <- glmmTMB(
+    fish_count ~ site + year + month +
+      (1 | site_year_block) +
+      (1 | site_date),
+    family = nbinom2,
+    data = zone_data
+  )
+
+  # Site × Year interaction
+  model_int <- glmmTMB(
+    fish_count ~ site * year + month +
+      (1 | site_year_block) +
+      (1 | site_date),
+    family = nbinom2,
+    data = zone_data
+  )
+
+  cat("\nINTERACTION TEST:\n")
+  print(anova(model_add, model_int))
+
+  cat("\nMODEL SUMMARY:\n")
+  print(summary(model_int))
+
+  cat("\nCONVERGENCE:\n")
+  print(model_int$fit$convergence)
+  print(model_int$sdr$pdHess)
+
+  # Basic residual checks
+  set.seed(123)
+
+  res <- simulateResiduals(
+    fittedModel = model_int,
+    n = 500
+  )
+
+  cat("\nDISPERSION:\n")
+  print(testDispersion(res))
+
+  cat("\nZERO INFLATION:\n")
+  print(testZeroInflation(res))
+
+  fish_nb_models[[zone]] <- list(
+    additive = model_add,
+    interaction = model_int,
+    residuals = res
+  )
+}
+```
+
+```{r}
+for (zone in c("fish_on", "fish_off")) {
+
+  cat("\n========================\n")
+  cat("ZONE:", zone, "\n")
+  cat("========================\n")
+
+  model <- fish_nb_models[[zone]]$additive
+
+  # Overall year comparison
+  cat("\nYEAR: 2026 / 2025\n")
+
+  print(
+    summary(
+      contrast(
+        emmeans(model, ~ year),
+        method = "revpairwise"
+      ),
+      type = "response",
+      infer = c(TRUE, TRUE)
+    )
+  )
+
+  # Overall site comparison
+  cat("\nSITE: Noyo / Big River\n")
+
+  print(
+    summary(
+      contrast(
+        emmeans(model, ~ site),
+        method = "revpairwise"
+      ),
+      type = "response",
+      infer = c(TRUE, TRUE)
+    )
+  )
+
+  # Final residual checks
+  set.seed(123)
+
+  res <- simulateResiduals(
+    model,
+    n = 500
+  )
+
+  cat("\nUNIFORMITY:\n")
+  print(testUniformity(res))
+
+  cat("\nOUTLIERS:\n")
+  print(testOutliers(res, type = "bootstrap"))
+}
+```
+
+```{r}
+# Exclude unidentified or nonspecies categories
+richness_codes <- setdiff(
+  species_codes,
+  c("UNKNOWN", "YOY")
+)
+
+# Count species observed within each survey zone
+fish_richness_zone <- fish_zone_species %>%
+  mutate(
+    fish_richness = rowSums(
+      pick(all_of(richness_codes)) > 0
+    )
+  )
+
+# Average surveys within block-dates
+fish_richness_block_date <- fish_richness_zone %>%
+  group_by(
+    site, year, date, month,
+    plot_number, fish_location
+  ) %>%
+  summarise(
+    mean_richness = mean(fish_richness),
+    .groups = "drop"
+  )
+
+# Average dates within block-months
+fish_richness_block_month <- fish_richness_block_date %>%
+  group_by(
+    site, year, month,
+    plot_number, fish_location
+  ) %>%
+  summarise(
+    block_richness = mean(mean_richness),
+    .groups = "drop"
+  )
+
+# Annual block-weighted richness
+fish_richness_year <- fish_richness_block_month %>%
+  group_by(site, year, plot_number, fish_location) %>%
+  summarise(
+    block_richness = mean(block_richness),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, fish_location) %>%
+  summarise(
+    n_blocks = n(),
+    se_richness = sd(block_richness) / sqrt(n()),
+    mean_richness = mean(block_richness),
+    .groups = "drop"
+  )
+
+print(fish_richness_year, n = Inf)
+
+# Monthly richness ± SE across blocks
+fish_richness_month_summary <- fish_richness_block_month %>%
+  group_by(site, year, month, fish_location) %>%
+  summarise(
+    n_blocks = n(),
+    se_richness = sd(block_richness) / sqrt(n()),
+    mean_richness = mean(block_richness),
+    .groups = "drop"
+  )
+
+print(fish_richness_month_summary, n = Inf)
+```
+
+```{r}
+make_fish_richness_plot <- function(site_name) {
+
+  plot_data <- fish_richness_month_summary %>%
+    filter(site == site_name) %>%
+    mutate(
+      year = factor(year, levels = c(2025, 2026)),
+      fish_location = factor(
+        fish_location,
+        levels = c("fish_on", "fish_off"),
+        labels = c("Fish on", "Fish off")
+      )
+    )
+
+  site_title <- if (
+    site_name == "big_river"
+  ) "Big River" else "Noyo"
+
+  ggplot(
+    plot_data,
+    aes(
+      x = month,
+      y = mean_richness,
+      color = year,
+      linetype = fish_location,
+      shape = fish_location,
+      group = interaction(year, fish_location)
+    )
+  ) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2.6) +
+    geom_errorbar(
+      aes(
+        ymin = pmax(0, mean_richness - se_richness),
+        ymax = mean_richness + se_richness
+      ),
+      width = 0.15,
+      linewidth = 0.5
+    ) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_linetype_manual(
+      values = c(
+        "Fish on" = "solid",
+        "Fish off" = "dashed"
+      )
+    ) +
+    scale_shape_manual(
+      values = c(
+        "Fish on" = 16,
+        "Fish off" = 17
+      )
+    ) +
+    scale_x_continuous(
+      breaks = 4:10,
+      labels = month.abb[4:10]
+    ) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    coord_cartesian(ylim = c(0, NA)) +
+    labs(
+      title = paste("Fish Species Richness —", site_title),
+      x = "Month",
+      y = "Mean species richness per survey",
+      color = "Year",
+      linetype = NULL,
+      shape = NULL
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+fish_richness_big_river <- make_fish_richness_plot("big_river")
+fish_richness_noyo <- make_fish_richness_plot("noyo")
+
+print(fish_richness_big_river)
+print(fish_richness_noyo)
+```
+
+```{r}
+fish_richness_model_data <- fish_richness_zone %>%
+  mutate(
+    site = factor(site, levels = c("big_river", "noyo")),
+    year = factor(year, levels = c(2025, 2026)),
+    month = factor(month),
+    site_year_block = interaction(
+      site, year, plot_number, drop = TRUE
+    ),
+    site_date = interaction(site, date, drop = TRUE)
+  )
+
+fish_richness_models <- list()
+
+for (zone in c("fish_on", "fish_off")) {
+
+  cat("\nZONE:", zone, "\n")
+
+  zone_data <- fish_richness_model_data %>%
+    filter(fish_location == zone) %>%
+    droplevels()
+
+  model_add <- glmmTMB(
+    fish_richness ~ site + year + month +
+      (1 | site_year_block) + (1 | site_date),
+    family = poisson,
+    data = zone_data
+  )
+
+  model_int <- glmmTMB(
+    fish_richness ~ site * year + month +
+      (1 | site_year_block) + (1 | site_date),
+    family = poisson,
+    data = zone_data
+  )
+
+  print(anova(model_add, model_int))
+  print(summary(model_int))
+
+  cat("Convergence:", model_int$fit$convergence, "\n")
+  cat("Hessian:", model_int$sdr$pdHess, "\n")
+
+  set.seed(123)
+  res <- DHARMa::simulateResiduals(model_int, n = 1000)
+
+  print(DHARMa::testUniformity(res))
+  print(DHARMa::testDispersion(res))
+  print(DHARMa::testZeroInflation(res))
+
+  fish_richness_models[[zone]] <- list(
+    additive = model_add,
+    interaction = model_int
+  )
+}
+```
+
+```{r}
+fish_on_data <- fish_richness_model_data %>%
+  filter(fish_location == "fish_on") %>%
+  droplevels()
+
+# Simplified fish-on models
+fish_rich_on_add <- glmmTMB(
+  fish_richness ~ site + year + month +
+    (1 | site_date),
+  family = poisson,
+  data = fish_on_data
+)
+
+fish_rich_on_int <- glmmTMB(
+  fish_richness ~ site * year + month +
+    (1 | site_date),
+  family = poisson,
+  data = fish_on_data
+)
+
+anova(fish_rich_on_add, fish_rich_on_int)
+
+# Fish-on: year comparisons within each site
+summary(
+  pairs(
+    emmeans(fish_rich_on_int, ~ year | site),
+    reverse = TRUE
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+# Fish-off: overall year comparison
+summary(
+  pairs(
+    emmeans(
+      fish_richness_models[["fish_off"]]$additive,
+      ~ year
+    ),
+    reverse = TRUE
+  ),
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+
+# Diagnostics for simplified fish-on model
+set.seed(123)
+
+fish_rich_on_res <- DHARMa::simulateResiduals(
+  fish_rich_on_int,
+  n = 1000
+)
+
+DHARMa::testUniformity(fish_rich_on_res)
+DHARMa::testDispersion(fish_rich_on_res)
+DHARMa::testZeroInflation(fish_rich_on_res)
+```
+
+##COMBINED
+```{r}
+# Common identifiers
+keys <- c("site", "year", "date", "plot_number")
+
+# Function that automatically creates plot_number if missing
+get_coverage <- function(data, group_name) {
+
+  if (!("plot_number" %in% names(data))) {
+    data <- data %>%
+      mutate(
+        plot_number = as.integer(
+          str_extract(as.character(arkev_unit), "\\d+")
+        )
+      )
+  }
+
+  data %>%
+    mutate(
+      year = as.integer(as.character(year)),
+      date = as.Date(date),
+      site = str_replace_all(
+        str_to_lower(str_trim(site)), " ", "_"
+      )
+    ) %>%
+    filter(
+      !is.na(site),
+      !is.na(year),
+      !is.na(date),
+      !is.na(plot_number)
+    ) %>%
+    distinct(site, year, date, plot_number) %>%
+    mutate(!!group_name := 1L)
+}
+
+# Combine coverage across all five communities
+community_coverage <- get_coverage(
+  kelp_sitewide, "kelp"
+) %>%
+  full_join(
+    get_coverage(grazer_sitewide, "grazers"),
+    by = keys
+  ) %>%
+  full_join(
+    get_coverage(invert_sitewide, "inverts"),
+    by = keys
+  ) %>%
+  full_join(
+    get_coverage(
+      cover_sitewide %>%
+        filter(if_all(all_of(cover_groups), ~ !is.na(.x))),
+      "cover"
+    ),
+    by = keys
+  ) %>%
+  full_join(
+    get_coverage(fish_zone_both, "fish"),
+    by = keys
+  ) %>%
+  mutate(
+    across(
+      c(kelp, grazers, inverts, cover, fish),
+      ~ replace_na(.x, 0L)
+    ),
+    n_communities = kelp + grazers + inverts +
+      cover + fish
+  )
+
+# Summarize overlapping surveys
+community_coverage %>%
+  group_by(site, year) %>%
+  summarise(
+    total_block_dates = n(),
+    all_five = sum(n_communities == 5),
+    four_or_more = sum(n_communities >= 4),
+    three_or_more = sum(n_communities >= 3),
+    .groups = "drop"
+  ) %>%
+  print(n = Inf)
+```
+
+```{r}
+# Common identifiers
+keys <- c("site", "year", "date", "plot_number")
+
+# Standardize identifiers across all communities
+prepare_integrated <- function(data) {
+
+  data %>%
+    mutate(
+      site = str_replace_all(
+        str_to_lower(str_trim(site)), " ", "_"
+      ),
+      year = as.integer(as.character(year)),
+      date = as.Date(date),
+
+      # Handles both 10A and C10A
+      plot_number = as.integer(
+        str_extract(as.character(arkev_unit), "\\d+")
+      )
+    ) %>%
+    filter(
+      !is.na(site),
+      !is.na(year),
+      !is.na(date),
+      !is.na(plot_number)
+    )
+}
+
+#Kelp
+integrated_kelp <- kelp_richness_sitewide %>%
+  prepare_integrated() %>%
+  group_by(across(all_of(keys))) %>%
+  summarise(
+    kelp_density = mean(kelp_density),
+    kelp_richness = mean(kelp_richness),
+    .groups = "drop"
+  )
+
+#Grazers
+integrated_grazers <- grazer_sitewide %>%
+  prepare_integrated() %>%
+  group_by(across(all_of(keys))) %>%
+  summarise(
+    grazer_density = mean(grazer_density),
+    .groups = "drop"
+  )
+
+#inverts
+integrated_inverts <- invert_richness_sitewide %>%
+  prepare_integrated() %>%
+  group_by(across(all_of(keys))) %>%
+  summarise(
+    invert_density = mean(invert_density),
+    invert_richness = mean(invert_richness),
+    .groups = "drop"
+  )
+
+#Benthic cover
+integrated_cover <- cover_sitewide %>%
+  prepare_integrated() %>%
+  filter(
+    if_all(all_of(cover_groups), ~ !is.na(.x))
+  ) %>%
+  group_by(across(all_of(keys))) %>%
+  summarise(
+    across(all_of(cover_groups), mean),
+    .groups = "drop"
+  )
+
+#Fish (on and off separately)
+integrated_fish <- fish_zone_both %>%
+  prepare_integrated() %>%
+  group_by(across(all_of(keys)), fish_location) %>%
+  summarise(
+    fish_density = mean(fish_density),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    fish_richness_zone %>%
+      prepare_integrated() %>%
+      group_by(across(all_of(keys)), fish_location) %>%
+      summarise(
+        fish_richness = mean(fish_richness),
+        .groups = "drop"
+      ),
+    by = c(keys, "fish_location")
+  ) %>%
+  pivot_wider(
+    names_from = fish_location,
+    values_from = c(fish_density, fish_richness)
+  ) %>%
+  rename(
+    density_fish_on = fish_density_fish_on,
+    density_fish_off = fish_density_fish_off,
+    richness_fish_on = fish_richness_fish_on,
+    richness_fish_off = fish_richness_fish_off
+  )
+```
+
+```{r}
+# Ecological variables
+ecological_vars <- c(
+  "kelp_density",
+  "kelp_richness",
+  "grazer_density",
+  "invert_density",
+  "invert_richness",
+  cover_groups,
+  "density_fish_on",
+  "density_fish_off",
+  "richness_fish_on",
+  "richness_fish_off"
+)
+
+#Join all five communities
+integrated_block_date <- list(
+  integrated_kelp,
+  integrated_grazers,
+  integrated_inverts,
+  integrated_cover,
+  integrated_fish
+) %>%
+  purrr::reduce(inner_join, by = keys) %>%
+  filter(
+    if_all(all_of(ecological_vars), ~ !is.na(.x))
+  )
+
+integrated_block_year <- integrated_block_date %>%
+  mutate(month = as.integer(format(date, "%m"))) %>%
+  group_by(site, year, plot_number, month) %>%
+  summarise(
+    across(all_of(ecological_vars), mean),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, plot_number) %>%
+  summarise(
+    n_months = n(),
+    across(all_of(ecological_vars), mean),
+    .groups = "drop"
+  )
+
+integrated_block_date %>%
+  count(site, year, name = "n_block_dates") %>%
+  print(n = Inf)
+
+integrated_block_year %>%
+  count(site, year, name = "n_blocks") %>%
+  print(n = Inf)
+
+integrated_block_year %>%
+  summarise(
+    across(all_of(ecological_vars), ~ sum(is.na(.x)))
+  ) %>%
+  print(width = Inf)
+```
+
+```{r}
+#Prepare ecological variables
+
+density_vars <- c(
+  "kelp_density",
+  "grazer_density",
+  "invert_density",
+  "density_fish_on",
+  "density_fish_off"
+)
+
+pca_data <- integrated_block_year %>%
+  select(all_of(ecological_vars)) %>%
+  mutate(
+    across(all_of(density_vars), log1p)
+  )
+
+#PCA with standardized variables
+
+integrated_pca <- prcomp(
+  pca_data,
+  center = TRUE,
+  scale. = TRUE
+)
+
+# Variance explained by each axis
+
+pca_variance <- 100 *
+  integrated_pca$sdev^2 /
+  sum(integrated_pca$sdev^2)
+
+print(round(pca_variance[1:5], 1))
+```
+
+```{r}
+#Extract PCA scores
+density_vars <- c(
+  "kelp_density",
+  "grazer_density",
+  "invert_density",
+  "density_fish_on",
+  "density_fish_off"
+)
+
+pca_data <- integrated_block_year %>%
+  select(all_of(ecological_vars)) %>%
+  mutate(
+    across(all_of(density_vars), log1p)
+  )
+
+integrated_pca <- prcomp(
+  pca_data,
+  center = TRUE,
+  scale. = TRUE
+)
+
+pca_variance <- 100 *
+  integrated_pca$sdev^2 /
+  sum(integrated_pca$sdev^2)
+
+print(round(pca_variance[1:5], 1))
+```
+
+```{r}
+pca_scores <- bind_cols(
+  integrated_block_year %>%
+    select(site, year, plot_number),
+  as_tibble(integrated_pca$x[, 1:2])
+) %>%
+  mutate(
+    site = factor(
+      site,
+      levels = c("big_river", "noyo"),
+      labels = c("Big River", "Noyo")
+    ),
+    year = factor(year, levels = c(2025, 2026))
+  )
+
+pca_vectors <- as.data.frame(
+  integrated_pca$rotation[, 1:2]
+) %>%
+  tibble::rownames_to_column("variable") %>%
+  mutate(
+    contribution = PC1^2 + PC2^2
+  ) %>%
+  slice_max(contribution, n = 10)
+
+arrow_scale <- 0.8 * min(
+  diff(range(pca_scores$PC1)) /
+    diff(range(pca_vectors$PC1)),
+  diff(range(pca_scores$PC2)) /
+    diff(range(pca_vectors$PC2))
+)
+
+pca_vectors <- pca_vectors %>%
+  mutate(
+    PC1 = PC1 * arrow_scale,
+    PC2 = PC2 * arrow_scale
+  )
+```
+
+```{r}
+# Extract the 10 strongest PCA vectors
+pca_vectors <- as.data.frame(
+  integrated_pca$rotation[, 1:2]
+) %>%
+  tibble::rownames_to_column("variable") %>%
+  mutate(
+    contribution = PC1^2 + PC2^2
+  ) %>%
+  slice_max(
+    contribution,
+    n = 10,
+    with_ties = FALSE
+  )
+
+# Scale vectors to fit the PCA scores
+arrow_scale <- 0.8 * min(
+  diff(range(pca_scores$PC1)) / diff(range(pca_vectors$PC1)),
+  diff(range(pca_scores$PC2)) / diff(range(pca_vectors$PC2))
+)
+
+pca_vectors <- pca_vectors %>%
+  mutate(
+    PC1 = PC1 * arrow_scale,
+    PC2 = PC2 * arrow_scale
+  )
+
+# Base PCA plot without vectors
+integrated_pca_plot <- ggplot(
+  pca_scores,
+  aes(x = PC1, y = PC2, color = site, shape = year)
+) +
+  geom_hline(yintercept = 0, color = "grey75") +
+  geom_vline(xintercept = 0, color = "grey75") +
+  geom_point(size = 3.5, alpha = 0.85) +
+  scale_color_manual(
+    values = c(
+      "Big River" = "#D55E00",
+      "Noyo" = "#0072B2"
+    )
+  ) +
+  scale_shape_manual(
+    values = c(
+      "2025" = 16,
+      "2026" = 17
+    )
+  ) +
+  labs(
+    title = "Community Composition by Year and Site",
+    x = paste0("PC1 (", round(pca_variance[1], 1), "%)"),
+    y = paste0("PC2 (", round(pca_variance[2], 1), "%)"),
+    color = "Site",
+    shape = "Year"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+# Add one set of vectors to the base plot
+integrated_pca_biplot <- integrated_pca_plot +
+  geom_segment(
+    data = pca_vectors,
+    aes(
+      x = 0, y = 0,
+      xend = PC1, yend = PC2
+    ),
+    inherit.aes = FALSE,
+    arrow = grid::arrow(
+      length = grid::unit(0.18, "cm")
+    ),
+    color = "grey40",
+    linewidth = 0.5
+  ) +
+  ggrepel::geom_text_repel(
+    data = pca_vectors,
+    aes(
+      x = PC1 * 1.1,
+      y = PC2 * 1.1,
+      label = variable
+    ),
+    inherit.aes = FALSE,
+    size = 3.3,
+    color = "black",
+    box.padding = 0.5,
+    point.padding = 0.3,
+    max.overlaps = Inf,
+    max.iter = 10000,
+    seed = 123,
+    segment.color = "grey65"
+  )
+
+print(integrated_pca_plot)
+print(integrated_pca_biplot)
+```
+
+```{r}
+# Extract all 16 PCA vectors
+pca_vectors_all <- as.data.frame(
+  integrated_pca$rotation[, 1:2]
+) %>%
+  tibble::rownames_to_column("variable")
+
+# Scale all vectors consistently with the existing biplot
+pca_vectors_all <- pca_vectors_all %>%
+  mutate(
+    PC1 = PC1 * arrow_scale,
+    PC2 = PC2 * arrow_scale
+  )
+
+# Create biplot with all vectors
+integrated_pca_biplot_all <- integrated_pca_plot +
+  geom_segment(
+    data = pca_vectors_all,
+    aes(
+      x = 0,
+      y = 0,
+      xend = PC1,
+      yend = PC2
+    ),
+    inherit.aes = FALSE,
+    arrow = grid::arrow(
+      length = grid::unit(0.18, "cm")
+    ),
+    color = "grey40",
+    linewidth = 0.5
+  ) +
+  ggrepel::geom_text_repel(
+    data = pca_vectors_all,
+    aes(
+      x = PC1 * 1.1,
+      y = PC2 * 1.1,
+      label = variable
+    ),
+    inherit.aes = FALSE,
+    size = 3,
+    color = "black",
+    box.padding = 0.6,
+    point.padding = 0.3,
+    force = 2,
+    max.overlaps = Inf,
+    max.iter = 20000,
+    seed = 123,
+    segment.color = "grey65"
+  )
+
+print(integrated_pca_biplot_all)
+```
+
+```{r}
+pca_stages <- list(
+  "Big River — 2025" = pca_scores %>%
+    filter(site == "Big River", year == "2025"),
+
+  "Big River — 2025 and 2026" = pca_scores %>%
+    filter(site == "Big River"),
+
+  "Big River + Noyo 2025" = pca_scores %>%
+    filter(
+      site == "Big River" |
+        (site == "Noyo" & year == "2025")
+    ),
+
+  "Big River + Noyo — Both Years" = pca_scores
+)
+
+# Keep the same axis limits in all four plots
+pca_xlim <- range(pca_scores$PC1)
+pca_ylim <- range(pca_scores$PC2)
+
+pca_xlim <- pca_xlim + c(-1, 1) * diff(pca_xlim) * 0.08
+pca_ylim <- pca_ylim + c(-1, 1) * diff(pca_ylim) * 0.08
+
+pca_step_plots <- lapply(
+  names(pca_stages),
+  function(stage_name) {
+
+    ggplot(
+      pca_stages[[stage_name]],
+      aes(
+        x = PC1,
+        y = PC2,
+        color = site,
+        shape = year
+      )
+    ) +
+      geom_hline(
+        yintercept = 0,
+        color = "grey80"
+      ) +
+      geom_vline(
+        xintercept = 0,
+        color = "grey80"
+      ) +
+      geom_point(
+        size = 3.5,
+        alpha = 0.9
+      ) +
+      scale_color_manual(
+        values = c(
+          "Big River" = "#D55E00",
+          "Noyo" = "#0072B2"
+        ),
+        drop = FALSE
+      ) +
+      scale_shape_manual(
+        values = c(
+          "2025" = 16,
+          "2026" = 17
+        ),
+        drop = FALSE
+      ) +
+      coord_cartesian(
+        xlim = pca_xlim,
+        ylim = pca_ylim
+      ) +
+      labs(
+        title = "Community Composition by Year and Site",
+        x = paste0(
+          "PC1 (", round(pca_variance[1], 1), "%)"
+        ),
+        y = paste0(
+          "PC2 (", round(pca_variance[2], 1), "%)"
+        ),
+        color = "Site",
+        shape = "Year"
+      ) +
+      theme_classic(base_size = 13) +
+      theme(
+        plot.title = element_text(face = "bold"),
+        legend.position = "bottom"
+      )
+  }
+)
+
+names(pca_step_plots) <- names(pca_stages)
+
+for (p in pca_step_plots) {
+  print(p)
+}
+```
+
+```{r}
+integrated_test <- bind_cols(
+  integrated_block_year %>%
+    select(site, year, plot_number),
+  as.data.frame(scale(pca_data))
+)
+
+br_integrated <- integrated_test %>%
+  filter(
+    site == "big_river",
+    plot_number %in% 1:7
+  ) %>%
+  mutate(
+    year = factor(year),
+    block = factor(plot_number)
+  ) %>%
+  arrange(block, year)
+
+br_integrated_dist <- dist(
+  br_integrated %>%
+    select(all_of(ecological_vars))
+)
+
+set.seed(123)
+
+br_integrated_permanova <- vegan::adonis2(
+  br_integrated_dist ~ block + year,
+  data = br_integrated,
+  permutations = 9999,
+  strata = br_integrated$block,
+  by = "terms"
+)
+
+print(br_integrated_permanova)
+```
+
+```{r}
+br_shared_month <- integrated_block_date %>%
+  filter(
+    site == "big_river",
+    plot_number %in% 1:7,
+    as.integer(format(date, "%m")) %in% c(7, 8)
+  ) %>%
+  mutate(
+    month = as.integer(format(date, "%m"))
+  ) %>%
+  group_by(site, year, plot_number, month) %>%
+  summarise(
+    across(all_of(ecological_vars), mean),
+    .groups = "drop"
+  )
+
+br_shared <- br_shared_month %>%
+  group_by(site, year, plot_number) %>%
+  filter(n_distinct(month) == 2) %>%
+  summarise(
+    across(all_of(ecological_vars), mean),
+    .groups = "drop"
+  ) %>%
+  group_by(plot_number) %>%
+  filter(n_distinct(year) == 2) %>%
+  ungroup() %>%
+  mutate(
+    year = factor(year),
+    block = factor(plot_number)
+  ) %>%
+  arrange(block, year)
+
+br_shared %>%
+  count(block, year) %>%
+  print(n = Inf)
+
+br_shared_scaled <- br_shared %>%
+  select(all_of(ecological_vars)) %>%
+  mutate(
+    across(all_of(density_vars), log1p)
+  ) %>%
+  as.matrix()
+
+br_shared_scaled <- scale(
+  br_shared_scaled,
+  center = integrated_pca$center,
+  scale = integrated_pca$scale
+)
+
+br_shared_dist <- dist(br_shared_scaled)
+
+set.seed(123)
+
+br_shared_permanova <- vegan::adonis2(
+  br_shared_dist ~ block + year,
+  data = br_shared,
+  permutations = 9999,
+  strata = br_shared$block,
+  by = "terms"
+)
+
+print(br_shared_permanova)
+```
+
+```{r}
+br_disp_full <- vegan::betadisper(
+  br_integrated_dist,
+  br_integrated$year
+)
+
+br_disp_shared <- vegan::betadisper(
+  br_shared_dist,
+  br_shared$year
+)
+
+set.seed(123)
+
+vegan::permutest(
+  br_disp_full,
+  permutations = 9999
+)
+
+vegan::permutest(
+  br_disp_shared,
+  permutations = 9999
+)
+
+br_disp_full$group.distances
+br_disp_shared$group.distances
+```
+
+```{r}
+#weighted variables
+community_groups <- list(
+  kelp = c("kelp_density", "kelp_richness"),
+  grazers = "grazer_density",
+  invertebrates = c("invert_density", "invert_richness"),
+  benthic_cover = cover_groups,
+  fish = c(
+    "density_fish_on",
+    "density_fish_off",
+    "richness_fish_on",
+    "richness_fish_off"
+  )
+)
+
+community_weights <- unlist(
+  lapply(
+    community_groups,
+    function(vars) {
+      setNames(
+        rep(1 / sqrt(length(vars)), length(vars)),
+        vars
+      )
+    }
+  )
+)
+
+names(community_weights) <- unlist(
+  community_groups,
+  use.names = FALSE
+)
+
+stopifnot(
+  setequal(names(community_weights), ecological_vars),
+  !anyDuplicated(names(community_weights))
+)
+
+# Full-season: same seven physical blocks
+br_weighted_data <- sweep(
+  as.matrix(br_integrated[, ecological_vars]),
+  2,
+  community_weights[ecological_vars],
+  "*"
+)
+
+br_weighted_dist <- dist(br_weighted_data)
+
+set.seed(123)
+
+br_weighted_permanova <- vegan::adonis2(
+  br_weighted_dist ~ block + year,
+  data = br_integrated,
+  permutations = 9999,
+  strata = br_integrated$block,
+  by = "terms"
+)
+
+print(br_weighted_permanova)
+
+
+# July–August: same seven blocks, matching months
+br_shared_weighted_data <- sweep(
+  br_shared_scaled,
+  2,
+  community_weights[colnames(br_shared_scaled)],
+  "*"
+)
+
+br_shared_weighted_dist <- dist(br_shared_weighted_data)
+
+set.seed(123)
+
+br_shared_weighted_permanova <- vegan::adonis2(
+  br_shared_weighted_dist ~ block + year,
+  data = br_shared,
+  permutations = 9999,
+  strata = br_shared$block,
+  by = "terms"
+)
+
+print(br_shared_weighted_permanova)
+
+br_weighted_disp <- vegan::betadisper(
+  br_weighted_dist,
+  br_integrated$year
+)
+
+br_shared_weighted_disp <- vegan::betadisper(
+  br_shared_weighted_dist,
+  br_shared$year
+)
+
+set.seed(123)
+
+vegan::permutest(
+  br_weighted_disp,
+  permutations = 9999
+)
+
+set.seed(123)
+
+vegan::permutest(
+  br_shared_weighted_disp,
+  permutations = 9999
+)
+
+br_weighted_disp$group.distances
+br_shared_weighted_disp$group.distances
+```
+
+
+```{r}
+noyo_integrated <- integrated_test %>%
+  filter(site == "noyo") %>%
+  mutate(year = factor(year))
+
+noyo_integrated_dist <- dist(
+  noyo_integrated %>%
+    select(all_of(ecological_vars))
+)
+
+set.seed(123)
+
+noyo_integrated_permanova <- vegan::adonis2(
+  noyo_integrated_dist ~ year,
+  data = noyo_integrated,
+  permutations = 9999
+)
+
+print(noyo_integrated_permanova)
+
+noyo_integrated_disp <- vegan::betadisper(
+  noyo_integrated_dist,
+  group = noyo_integrated$year
+)
+
+vegan::permutest(
+  noyo_integrated_disp,
+  permutations = 9999
+)
+```
+
+```{r}
+noyo_shared <- integrated_block_date %>%
+  mutate(month = as.integer(format(date, "%m"))) %>%
+  filter(
+    site == "noyo",
+    month %in% c(7, 8)
+  ) %>%
+  group_by(year, plot_number, month) %>%
+  summarise(
+    across(all_of(ecological_vars), mean),
+    .groups = "drop"
+  ) %>%
+  group_by(year, plot_number) %>%
+  summarise(
+    across(all_of(ecological_vars), mean),
+    .groups = "drop"
+  ) %>%
+  mutate(year = factor(year))
+
+print(noyo_shared %>% count(year))
+
+noyo_shared_matrix <- noyo_shared %>%
+  select(all_of(ecological_vars)) %>%
+  mutate(across(all_of(density_vars), log1p)) %>%
+  as.matrix()
+
+noyo_shared_dist <- dist(
+  scale(
+    noyo_shared_matrix,
+    center = integrated_pca$center,
+    scale = integrated_pca$scale
+  )
+)
+
+set.seed(123)
+
+vegan::adonis2(
+  noyo_shared_dist ~ year,
+  data = noyo_shared,
+  permutations = 9999
+)
+
+vegan::permutest(
+  vegan::betadisper(
+    noyo_shared_dist,
+    group = noyo_shared$year
+  ),
+  permutations = 9999
+)
+```
+
+```{r}
+#weighted variables
+# Full-season Noyo analysis
+noyo_weighted_data <- sweep(
+  as.matrix(noyo_integrated[, ecological_vars]),
+  2,
+  community_weights[ecological_vars],
+  "*"
+)
+
+noyo_weighted_dist <- dist(noyo_weighted_data)
+
+set.seed(123)
+
+noyo_weighted_permanova <- vegan::adonis2(
+  noyo_weighted_dist ~ year,
+  data = noyo_integrated,
+  permutations = 9999
+)
+
+print(noyo_weighted_permanova)
+
+
+# July–August Noyo analysis
+noyo_shared_scaled <- scale(
+  noyo_shared_matrix,
+  center = integrated_pca$center,
+  scale = integrated_pca$scale
+)
+
+noyo_shared_weighted_data <- sweep(
+  noyo_shared_scaled,
+  2,
+  community_weights[colnames(noyo_shared_scaled)],
+  "*"
+)
+
+noyo_shared_weighted_dist <- dist(
+  noyo_shared_weighted_data
+)
+
+set.seed(123)
+
+noyo_shared_weighted_permanova <- vegan::adonis2(
+  noyo_shared_weighted_dist ~ year,
+  data = noyo_shared,
+  permutations = 9999
+)
+
+print(noyo_shared_weighted_permanova)
+
+
+# Dispersion tests
+noyo_weighted_disp <- vegan::betadisper(
+  noyo_weighted_dist,
+  noyo_integrated$year
+)
+
+noyo_shared_weighted_disp <- vegan::betadisper(
+  noyo_shared_weighted_dist,
+  noyo_shared$year
+)
+
+set.seed(123)
+
+vegan::permutest(
+  noyo_weighted_disp,
+  permutations = 9999
+)
+
+set.seed(123)
+
+vegan::permutest(
+  noyo_shared_weighted_disp,
+  permutations = 9999
+)
+```
+
+```{r}
+integrated_block_date %>%
+  filter(
+    site == "noyo",
+    as.integer(format(date, "%m")) %in% c(7, 8)
+  ) %>%
+  mutate(
+    month = as.integer(format(date, "%m"))
+  ) %>%
+  distinct(year, plot_number, month) %>%
+  count(year, plot_number, name = "n_months") %>%
+  count(year, n_months, name = "n_blocks") %>%
+  print(n = Inf)
+```
+
+```{r}
+noyo_sources <- list(
+  kelp = integrated_kelp,
+  grazers = integrated_grazers,
+  inverts = integrated_inverts,
+  cover = integrated_cover,
+  fish = integrated_fish,
+  matched = integrated_block_date
+)
+
+noyo_month_audit <- purrr::imap_dfr(
+  noyo_sources,
+  function(df, source_name) {
+    df %>%
+      filter(
+        site == "noyo",
+        year == 2026,
+        format(date, "%m") %in% c("07", "08")
+      ) %>%
+      mutate(
+        month = as.integer(format(date, "%m"))
+      ) %>%
+      distinct(plot_number, month, date) %>%
+      count(plot_number, month, name = "n_dates") %>%
+      mutate(source = source_name)
+  }
+) %>%
+  complete(
+    plot_number = 1:10,
+    month = c(7L, 8L),
+    source = names(noyo_sources),
+    fill = list(n_dates = 0L)
+  ) %>%
+  pivot_wider(
+    names_from = source,
+    values_from = n_dates
+  ) %>%
+  arrange(plot_number, month)
+
+noyo_month_audit %>%
+  filter(matched == 0) %>%
+  print(n = Inf, width = Inf)
+```
+
+
+
+```{r}
+noyo_shared_month <- integrated_block_date %>%
+  filter(
+    site == "noyo",
+    as.integer(format(date, "%m")) %in% c(7, 8)
+  ) %>%
+  mutate(
+    month = as.integer(format(date, "%m"))
+  ) %>%
+  group_by(year, plot_number, month) %>%
+  summarise(
+    across(all_of(ecological_vars), mean),
+    .groups = "drop"
+  )
+
+# Identify the incomplete block-year
+noyo_shared_month %>%
+  count(year, plot_number, name = "n_months") %>%
+  filter(n_months < 2) %>%
+  print()
+
+# Retain only block-years with both months
+noyo_shared <- noyo_shared_month %>%
+  group_by(year, plot_number) %>%
+  filter(n_distinct(month) == 2) %>%
+  summarise(
+    across(all_of(ecological_vars), mean),
+    .groups = "drop"
+  ) %>%
+  mutate(year = factor(year))
+
+print(noyo_shared %>% count(year))
+
+# Apply the same transformation and scaling as the PCA
+noyo_shared_scaled <- noyo_shared %>%
+  select(all_of(ecological_vars)) %>%
+  mutate(
+    across(all_of(density_vars), log1p)
+  ) %>%
+  as.matrix() %>%
+  scale(
+    center = integrated_pca$center,
+    scale = integrated_pca$scale
+  )
+
+# Original standardized analysis
+noyo_shared_dist <- dist(noyo_shared_scaled)
+
+set.seed(123)
+
+noyo_shared_permanova <- vegan::adonis2(
+  noyo_shared_dist ~ year,
+  data = noyo_shared,
+  permutations = 9999
+)
+
+print(noyo_shared_permanova)
+
+# Equal-community-weighted analysis
+noyo_shared_weighted_data <- sweep(
+  noyo_shared_scaled,
+  2,
+  community_weights[colnames(noyo_shared_scaled)],
+  "*"
+)
+
+noyo_shared_weighted_dist <- dist(
+  noyo_shared_weighted_data
+)
+
+set.seed(123)
+
+noyo_shared_weighted_permanova <- vegan::adonis2(
+  noyo_shared_weighted_dist ~ year,
+  data = noyo_shared,
+  permutations = 9999
+)
+
+print(noyo_shared_weighted_permanova)
+
+# Dispersion diagnostics
+set.seed(123)
+
+vegan::permutest(
+  vegan::betadisper(
+    noyo_shared_dist,
+    noyo_shared$year
+  ),
+  permutations = 9999
+)
+
+set.seed(123)
+
+vegan::permutest(
+  vegan::betadisper(
+    noyo_shared_weighted_dist,
+    noyo_shared$year
+  ),
+  permutations = 9999
+)
+```
+
+
+#UPC
+```{r}
+upc_26 = read_sheet('https://docs.google.com/spreadsheets/d/1VPHlUVfLAlGB0oEj0cs6hPSbI45WuIqCXnCsIu7DyPo/edit?gid=0#gid=0')
+print(upc_26)
+```
+
+```{r}
+library(tidyverse)
+
+upc_clean <- upc_26 %>%
+  mutate(
+    code = map_chr(code, ~ as.character(.x[[1]])),
+    relief_value = if_else(
+      data_type == "Relief",
+      suppressWarnings(as.numeric(code)),
+      NA_real_
+    )
+  )
+
+library(tidyverse)
+
+upc_plot <- upc_clean %>%
+  group_by(site, plot, data_type, code) %>%
+  summarise(
+    total_count = sum(count, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(site, plot, data_type) %>%
+  mutate(
+    percent = 100 * total_count / sum(total_count)
+  ) %>%
+  ungroup()
+```
+
+```{r}
+upc_plot_complete <- upc_plot %>%
+  group_by(data_type) %>%
+  complete(
+    nesting(site, plot),
+    code,
+    fill = list(
+      total_count = 0,
+      percent = 0
+    )
+  ) %>%
+  ungroup()
+
+upc_site <- upc_plot_complete %>%
+  group_by(site, data_type, code) %>%
+  summarise(
+    mean_percent = mean(percent),
+    sd_percent = sd(percent),
+    n_plots = n(),
+    .groups = "drop"
+  )
+```
+
+```{r}
+upc_site %>%
+  select(site, data_type, code, site_percent) %>%
+  arrange(site, data_type, desc(site_percent)) %>%
+  print(n = Inf)
+```
+
+
+
 
