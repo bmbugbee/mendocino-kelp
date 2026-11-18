@@ -2580,7 +2580,6 @@ make_kelp_site_fig <- function(site_name, title_text) {
     ) +
     labs(
       title = title_text,
-      subtitle = "All valid surveys; mean ± SE across blocks",
       x = "Month",
       y = expression(
         "Kelp density (individuals " * m^-2 * ")"
@@ -3314,8 +3313,46 @@ print(kelp_comp_fig)
 ```
 
 ```{r}
-# Hurricane plot data
+kelp_density_by_group <- kelp_2025_2026 %>%
+  prepare_integrated() %>%
+  mutate(month = as.integer(format(date, "%m"))) %>%
+  pivot_longer(
+    cols = all_of(shared_kelp),
+    names_to = "kelp_group",
+    values_to = "count"
+  ) %>%
+  group_by(site, year, date, plot_number, kelp_group) %>%
+  summarise(
+    density = mean(count / pi),
+    .groups = "drop"
+  ) %>%
+  mutate(month = as.integer(format(date, "%m"))) %>%
+  group_by(site, year, month, plot_number, kelp_group) %>%
+  summarise(
+    density = mean(density),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, plot_number, kelp_group) %>%
+  summarise(
+    density = mean(density),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, kelp_group) %>%
+  summarise(
+    mean_density = mean(density),
+    .groups = "drop"
+  )
+
 kelp_hurricane_data <- kelp_composition %>%
+  mutate(
+    site = as.character(site),
+    year = as.integer(as.character(year)),
+    kelp_group = as.character(kelp_group)
+  ) %>%
+  left_join(
+    kelp_density_by_group,
+    by = c("site", "year", "kelp_group")
+  ) %>%
   mutate(
     site = factor(
       site,
@@ -3331,16 +3368,18 @@ kelp_hurricane_data <- kelp_composition %>%
       year == "2025",
       -relative_abundance,
       relative_abundance
-    )
+    ),
+    density_label = if_else(
+      !is.na(mean_density) & mean_density > 0,
+      sprintf("%.3f", mean_density),
+      ""
+    ),
+    label_x = plot_abundance +
+      if_else(year == "2025", -4, 4)
   )
 
-year_colors <- c(
-  "2025" = "#D55E00",
-  "2026" = "#0072B2"
-)
-
-# Function to make one site-specific figure
 make_kelp_hurricane <- function(site_name) {
+
   ggplot(
     kelp_hurricane_data %>% filter(site == site_name),
     aes(
@@ -3359,19 +3398,34 @@ make_kelp_hurricane <- function(site_name) {
       color = "black",
       linewidth = 0.2
     ) +
+    geom_text(
+      aes(
+        x = label_x,
+        label = density_label,
+        hjust = if_else(year == "2025", 1, 0)
+      ),
+      size = 3.2,
+      color = "black",
+      show.legend = FALSE
+    ) +
     scale_fill_manual(
-      values = year_colors,
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      ),
       name = "Year"
     ) +
     scale_x_continuous(
       breaks = seq(-100, 100, 25),
       labels = function(x) paste0(abs(x), "%"),
-      expand = expansion(mult = c(0.02, 0.02))
+      limits = c(-125, 125),
+      expand = expansion(mult = c(0, 0))
     ) +
-    coord_cartesian(xlim = c(-105, 105)) +
     labs(
-      title = paste("Kelp Community Composition, 2025–2026 —", site_name),
-      subtitle = "Relative abundance among kelp-positive block-dates",
+      title = paste(
+        "Kelp Community Composition —",
+        site_name
+      ),
       x = "Relative abundance (%)",
       y = "Kelp group"
     ) +
@@ -3382,12 +3436,15 @@ make_kelp_hurricane <- function(site_name) {
     )
 }
 
-# Separate figures
 kelp_hurricane_big_river <- make_kelp_hurricane("Big River")
 kelp_hurricane_noyo <- make_kelp_hurricane("Noyo")
 
-kelp_hurricane_big_river
-kelp_hurricane_noyo
+print(kelp_hurricane_big_river)
+print(kelp_hurricane_noyo)
+
+kelp_density_by_group %>%
+  arrange(site, kelp_group, year) %>%
+  print(n = Inf)
 ```
 
 ```{r}
@@ -3452,6 +3509,28 @@ kelp_species_overview <- kelp_species_monthly %>%
 kelp_species_overview %>%
   print(n = Inf)
 ```
+
+```{r}
+prepare_integrated <- function(df) {
+  df %>%
+    mutate(
+      site = str_to_lower(
+        str_replace_all(as.character(site), "[[:space:]-]+", "_")
+      ),
+      year = as.integer(as.character(year)),
+      date = as.Date(date),
+      plot_number = if ("arkev_unit" %in% names(df)) {
+        as.integer(str_extract(as.character(arkev_unit), "\\d+"))
+      } else {
+        as.integer(plot_number)
+      }
+    )
+}
+
+keys <- c("site", "year", "date", "plot_number")
+```
+
+
 ```{r}
 kelp_other_taxa <- setdiff(
   shared_kelp,
@@ -3678,6 +3757,224 @@ kelp_rich_shared_int$fit$convergence
 kelp_rich_shared_int$sdr$pdHess
 ```
 
+```{r}
+# Check for zero-kelp block-years
+kelp_totals <- rowSums(kelp_pcoa_matrix)
+
+kelp_pcoa_data %>%
+  mutate(
+    total_kelp = kelp_totals,
+    zero_kelp = total_kelp == 0
+  ) %>%
+  group_by(site, year) %>%
+  summarise(
+    n_blocks = n(),
+    n_zero_kelp = sum(zero_kelp),
+    .groups = "drop"
+  ) %>%
+  print(n = Inf)
+
+# Check for invalid values
+stopifnot(
+  all(is.finite(kelp_pcoa_matrix)),
+  all(kelp_pcoa_matrix >= 0)
+)
+
+# Hellinger transformation while preserving zero-only rows
+kelp_hellinger <- matrix(
+  0,
+  nrow = nrow(kelp_pcoa_matrix),
+  ncol = ncol(kelp_pcoa_matrix),
+  dimnames = dimnames(kelp_pcoa_matrix)
+)
+
+positive_kelp <- kelp_totals > 0
+
+kelp_hellinger[positive_kelp, ] <- sqrt(
+  sweep(
+    kelp_pcoa_matrix[positive_kelp, , drop = FALSE],
+    1,
+    kelp_totals[positive_kelp],
+    "/"
+  )
+)
+
+# Calculate distances
+kelp_pcoa_dist <- dist(kelp_hellinger)
+
+stopifnot(
+  all(is.finite(as.vector(kelp_pcoa_dist)))
+)
+
+# Run PCoA
+kelp_pcoa <- vegan::wcmdscale(
+  kelp_pcoa_dist,
+  k = 2,
+  eig = TRUE
+)
+
+kelp_pcoa_variance <- 100 *
+  kelp_pcoa$eig[1:2] /
+  sum(kelp_pcoa$eig[kelp_pcoa$eig > 0])
+
+print(round(kelp_pcoa_variance, 1))
+```
+
+```{r}
+kelp_pcoa_scores <- bind_cols(
+  kelp_pcoa_data %>%
+    select(site, year, plot_number),
+  as_tibble(kelp_pcoa$points[, 1:2]) %>%
+    setNames(c("PCoA1", "PCoA2"))
+) %>%
+  mutate(
+    site = factor(
+      site,
+      levels = c("big_river", "noyo"),
+      labels = c("Big River", "Noyo")
+    ),
+    year = factor(year, levels = c(2025, 2026)),
+    no_live_kelp = rowSums(kelp_pcoa_matrix) == 0
+  )
+
+# Fit vectors for kelp taxa with variation across blocks
+kelp_vector_matrix <- kelp_hellinger[
+  ,
+  apply(kelp_hellinger, 2, sd) > 0,
+  drop = FALSE
+]
+
+kelp_vector_fit <- vegan::envfit(
+  kelp_pcoa$points[, 1:2],
+  kelp_vector_matrix,
+  permutations = 0
+)
+
+kelp_vectors <- as.data.frame(
+  vegan::scores(
+    kelp_vector_fit,
+    display = "vectors"
+  )
+) %>%
+  tibble::rownames_to_column("kelp_group")
+
+names(kelp_vectors)[2:3] <- c("PCoA1", "PCoA2")
+
+# Scale arrows using the full ordination
+kelp_arrow_scale <- 0.7 * min(
+  diff(range(kelp_pcoa_scores$PCoA1)) /
+    diff(range(kelp_vectors$PCoA1)),
+  diff(range(kelp_pcoa_scores$PCoA2)) /
+    diff(range(kelp_vectors$PCoA2))
+)
+
+kelp_vectors <- kelp_vectors %>%
+  mutate(
+    PCoA1 = PCoA1 * kelp_arrow_scale,
+    PCoA2 = PCoA2 * kelp_arrow_scale
+  )
+
+# Keep identical axis limits for both sites
+kelp_x_limits <- range(
+  c(kelp_pcoa_scores$PCoA1, kelp_vectors$PCoA1 * 1.15)
+)
+
+kelp_y_limits <- range(
+  c(kelp_pcoa_scores$PCoA2, kelp_vectors$PCoA2 * 1.15)
+)
+
+kelp_x_limits <- kelp_x_limits +
+  c(-1, 1) * diff(kelp_x_limits) * 0.15
+
+kelp_y_limits <- kelp_y_limits +
+  c(-1, 1) * diff(kelp_y_limits) * 0.15
+
+make_kelp_pcoa <- function(site_name) {
+
+  ggplot(
+    kelp_pcoa_scores %>%
+      filter(site == site_name),
+    aes(
+      x = PCoA1,
+      y = PCoA2,
+      color = year,
+      shape = year
+    )
+  ) +
+    geom_hline(yintercept = 0, color = "grey80") +
+    geom_vline(xintercept = 0, color = "grey80") +
+    geom_point(size = 3.5, alpha = 0.85) +
+    geom_segment(
+      data = kelp_vectors,
+      aes(
+        x = 0,
+        y = 0,
+        xend = PCoA1,
+        yend = PCoA2
+      ),
+      inherit.aes = FALSE,
+      arrow = grid::arrow(
+        length = grid::unit(0.18, "cm")
+      ),
+      color = "grey40",
+      linewidth = 0.5
+    ) +
+    ggrepel::geom_text_repel(
+      data = kelp_vectors,
+      aes(
+        x = PCoA1 * 1.1,
+        y = PCoA2 * 1.1,
+        label = kelp_group
+      ),
+      inherit.aes = FALSE,
+      size = 3.3,
+      color = "black",
+      box.padding = 0.5,
+      point.padding = 0.3,
+      max.overlaps = Inf,
+      seed = 123,
+      segment.color = "grey65"
+    ) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_shape_manual(
+      values = c(
+        "2025" = 16,
+        "2026" = 17
+      )
+    ) +
+    coord_cartesian(
+      xlim = kelp_x_limits,
+      ylim = kelp_y_limits
+    ) +
+    labs(
+      title = paste("Kelp Community PCoA —", site_name),
+      x = paste0(
+        "PCoA1 (", round(kelp_pcoa_variance[1], 1), "%)"
+      ),
+      y = paste0(
+        "PCoA2 (", round(kelp_pcoa_variance[2], 1), "%)"
+      ),
+      color = "Year",
+      shape = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+kelp_pcoa_big_river <- make_kelp_pcoa("Big River")
+kelp_pcoa_noyo <- make_kelp_pcoa("Noyo")
+
+print(kelp_pcoa_big_river)
+print(kelp_pcoa_noyo)
+```
 
 ##INVERTEBRATES
 ```{r}
@@ -4576,6 +4873,257 @@ summary(
 )
 ```
 
+```{r}
+invert_pcoa_taxa <- c(
+  "PATMIN",
+  "DERIMB",
+  "PISOCH",
+  "PISBRE",
+  "PISGIG",
+  "CANCERSPP",
+  "PUGPRO",
+  "PYCHEL"
+)
+
+invert_pcoa_data <- invert_2025_2026 %>%
+  prepare_integrated() %>%
+  mutate(
+    month = as.integer(format(date, "%m"))
+  ) %>%
+  group_by(site, year, plot_number, month, date) %>%
+  summarise(
+    across(all_of(invert_pcoa_taxa), mean),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, plot_number, month) %>%
+  summarise(
+    across(all_of(invert_pcoa_taxa), mean),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, plot_number) %>%
+  summarise(
+    across(all_of(invert_pcoa_taxa), mean),
+    .groups = "drop"
+  ) %>%
+  arrange(site, year, plot_number)
+
+invert_pcoa_matrix <- invert_pcoa_data %>%
+  select(all_of(invert_pcoa_taxa)) %>%
+  as.matrix()
+
+stopifnot(
+  all(is.finite(invert_pcoa_matrix)),
+  all(invert_pcoa_matrix >= 0)
+)
+
+invert_totals <- rowSums(invert_pcoa_matrix)
+
+invert_pcoa_data %>%
+  mutate(
+    no_inverts = invert_totals == 0
+  ) %>%
+  group_by(site, year) %>%
+  summarise(
+    n_blocks = n(),
+    n_zero_invert_blocks = sum(no_inverts),
+    .groups = "drop"
+  ) %>%
+  print(n = Inf)
+
+invert_hellinger <- matrix(
+  0,
+  nrow = nrow(invert_pcoa_matrix),
+  ncol = ncol(invert_pcoa_matrix),
+  dimnames = dimnames(invert_pcoa_matrix)
+)
+
+positive_inverts <- invert_totals > 0
+
+invert_hellinger[positive_inverts, ] <- sqrt(
+  sweep(
+    invert_pcoa_matrix[positive_inverts, , drop = FALSE],
+    1,
+    invert_totals[positive_inverts],
+    "/"
+  )
+)
+
+invert_pcoa_dist <- dist(invert_hellinger)
+
+invert_pcoa <- vegan::wcmdscale(
+  invert_pcoa_dist,
+  k = 2,
+  eig = TRUE
+)
+
+invert_pcoa_variance <- 100 *
+  invert_pcoa$eig[1:2] /
+  sum(invert_pcoa$eig[invert_pcoa$eig > 0])
+
+print(round(invert_pcoa_variance, 1))
+```
+
+```{r}
+invert_pcoa_scores <- bind_cols(
+  invert_pcoa_data %>%
+    select(site, year, plot_number),
+  as_tibble(invert_pcoa$points[, 1:2]) %>%
+    setNames(c("PCoA1", "PCoA2"))
+) %>%
+  mutate(
+    site = factor(
+      site,
+      levels = c("big_river", "noyo"),
+      labels = c("Big River", "Noyo")
+    ),
+    year = factor(year, levels = c(2025, 2026))
+  )
+
+# Fit taxon vectors to the combined ordination
+invert_vector_matrix <- invert_hellinger[
+  ,
+  apply(invert_hellinger, 2, sd) > 0,
+  drop = FALSE
+]
+
+invert_vector_fit <- vegan::envfit(
+  invert_pcoa$points[, 1:2],
+  invert_vector_matrix,
+  permutations = 0
+)
+
+invert_vectors <- as.data.frame(
+  vegan::scores(
+    invert_vector_fit,
+    display = "vectors"
+  )
+) %>%
+  tibble::rownames_to_column("invert_group")
+
+names(invert_vectors)[2:3] <- c("PCoA1", "PCoA2")
+
+# Scale arrows consistently across both figures
+invert_arrow_scale <- 0.7 * min(
+  diff(range(invert_pcoa_scores$PCoA1)) /
+    diff(range(invert_vectors$PCoA1)),
+  diff(range(invert_pcoa_scores$PCoA2)) /
+    diff(range(invert_vectors$PCoA2))
+)
+
+invert_vectors <- invert_vectors %>%
+  mutate(
+    PCoA1 = PCoA1 * invert_arrow_scale,
+    PCoA2 = PCoA2 * invert_arrow_scale
+  )
+
+# Use the same axis limits for Big River and Noyo
+invert_x_limits <- range(
+  c(invert_pcoa_scores$PCoA1, invert_vectors$PCoA1 * 1.15)
+)
+
+invert_y_limits <- range(
+  c(invert_pcoa_scores$PCoA2, invert_vectors$PCoA2 * 1.15)
+)
+
+invert_x_limits <- invert_x_limits +
+  c(-1, 1) * diff(invert_x_limits) * 0.15
+
+invert_y_limits <- invert_y_limits +
+  c(-1, 1) * diff(invert_y_limits) * 0.15
+
+make_invert_pcoa <- function(site_name) {
+
+  ggplot(
+    invert_pcoa_scores %>%
+      filter(site == site_name),
+    aes(
+      x = PCoA1,
+      y = PCoA2,
+      color = year,
+      shape = year
+    )
+  ) +
+    geom_hline(yintercept = 0, color = "grey80") +
+    geom_vline(xintercept = 0, color = "grey80") +
+    geom_point(size = 3.5, alpha = 0.85) +
+    geom_segment(
+      data = invert_vectors,
+      aes(
+        x = 0,
+        y = 0,
+        xend = PCoA1,
+        yend = PCoA2
+      ),
+      inherit.aes = FALSE,
+      arrow = grid::arrow(
+        length = grid::unit(0.18, "cm")
+      ),
+      color = "grey40",
+      linewidth = 0.5
+    ) +
+    ggrepel::geom_text_repel(
+      data = invert_vectors,
+      aes(
+        x = PCoA1 * 1.1,
+        y = PCoA2 * 1.1,
+        label = invert_group
+      ),
+      inherit.aes = FALSE,
+      size = 3.3,
+      color = "black",
+      box.padding = 0.5,
+      point.padding = 0.3,
+      force = 1.5,
+      max.overlaps = Inf,
+      max.iter = 10000,
+      seed = 123,
+      segment.color = "grey65"
+    ) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_shape_manual(
+      values = c(
+        "2025" = 16,
+        "2026" = 17
+      )
+    ) +
+    coord_cartesian(
+      xlim = invert_x_limits,
+      ylim = invert_y_limits
+    ) +
+    labs(
+      title = paste(
+        "Invertebrate Community PCoA —",
+        site_name
+      ),
+      x = paste0(
+        "PCoA1 (", round(invert_pcoa_variance[1], 1), "%)"
+      ),
+      y = paste0(
+        "PCoA2 (", round(invert_pcoa_variance[2], 1), "%)"
+      ),
+      color = "Year",
+      shape = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+invert_pcoa_big_river <- make_invert_pcoa("Big River")
+invert_pcoa_noyo <- make_invert_pcoa("Noyo")
+
+print(invert_pcoa_big_river)
+print(invert_pcoa_noyo)
+```
+
+
 ##GRAZERS
 ```{r}
 # All valid surveys, no treatment distinction
@@ -4682,7 +5230,7 @@ print(grazer_month_summary, n = Inf)
 # IDENTIFY ZERO-GRAZER SURVEYS
 # Inspect their locations, dates, and original records
 
-# 1. Extract every zero-grazer survey
+#Extract every zero-grazer survey
 
 grazer_zero_surveys <- grazer_sitewide %>%
   filter(grazer_total == 0) %>%
@@ -4698,7 +5246,7 @@ grazer_zero_surveys <- grazer_sitewide %>%
   ) %>%
   arrange(site, year, date, arkev_unit)
 
-# 2. Summarize where the zeros occur
+# Summarize where the zeros occur
 
 grazer_zero_surveys %>%
   count(
@@ -4707,13 +5255,13 @@ grazer_zero_surveys %>%
   ) %>%
   print(n = Inf)
 
-# 3. Display every zero-grazer survey
+# Display every zero-grazer survey
 
 grazer_zero_surveys %>%
   print(n = Inf, width = Inf)
 
 
-# 4. Inspect original 2025 survey records
+# Inspect original 2025 survey records
 # Includes urchins, Tegula, and abalone source records
 
 grazer_zeros_2025_raw <- surveys_2025 %>%
@@ -4746,7 +5294,7 @@ grazer_zeros_2025_raw %>%
   print(n = Inf, width = Inf)
 
 
-# 5. Inspect original 2026 grazer observations
+# Inspect original 2026 grazer observations
 
 grazer_zeros_2026_raw <- ki %>%
   semi_join(
@@ -4957,38 +5505,35 @@ testOutliers(
 ```
 
 ```{r}
-library(DHARMa)
-library(emmeans)
-
 # GRAZERS: Final diagnostic checks and contrasts
 # Full 2025–2026 dataset
 # No treatment factor
 
-# 1. Examine residual quantile patterns
+# Examine residual quantile patterns
 testQuantiles(
   grazer_zi_res,
   plot = TRUE
 )
 
-# 2. Check residuals by site
+# Check residuals by site
 testCategorical(
   grazer_zi_res,
   catPred = grazer_model_full$site
 )
 
-# 3. Check residuals by year
+# Check residuals by year
 testCategorical(
   grazer_zi_res,
   catPred = grazer_model_full$year
 )
 
-# 4. Check residuals by month
+# Check residuals by month
 testCategorical(
   grazer_zi_res,
   catPred = grazer_model_full$month
 )
 
-# 5. Year effect with 95% confidence interval
+# Year effect with 95% confidence interval
 grazer_year_contrast <- emmeans(
   grazer_count_zi_add,
   ~ year,
@@ -5002,7 +5547,7 @@ summary(
   infer = c(TRUE, TRUE)
 )
 
-# 6. Site effect with 95% confidence interval
+# Site effect with 95% confidence interval
 grazer_site_contrast <- emmeans(
   grazer_count_zi_add,
   ~ site,
@@ -5320,13 +5865,301 @@ print(grazer_density_big_river)
 print(grazer_density_noyo)
 ```
 
+```{r}
+grazer_taxa <- c(
+  "HALRUF",
+  "HALKAM",
+  "purple_urchins_<2cm",
+  "purple_urchins_>2cm",
+  "red_urchins",
+  "tegula"
+)
+
+grazer_pcoa_data <- grazer_2025_2026 %>%
+  mutate(
+    site = as.character(site),
+    year = as.integer(as.character(year)),
+    date = as.Date(date),
+    plot_number = as.integer(
+      stringr::str_extract(as.character(arkev_unit), "\\d+")
+    ),
+    month = as.integer(format(date, "%m"))
+  ) %>%
+  group_by(site, year, plot_number, month, date) %>%
+  summarise(
+    across(all_of(grazer_taxa), mean),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, plot_number, month) %>%
+  summarise(
+    across(all_of(grazer_taxa), mean),
+    .groups = "drop"
+  ) %>%
+  group_by(site, year, plot_number) %>%
+  summarise(
+    across(all_of(grazer_taxa), mean),
+    .groups = "drop"
+  ) %>%
+  arrange(site, year, plot_number)
+
+grazer_pcoa_data %>%
+  count(site, year) %>%
+  print(n = Inf)
+
+grazer_matrix <- grazer_pcoa_data %>%
+  select(all_of(grazer_taxa)) %>%
+  as.matrix()
+
+stopifnot(
+  !anyNA(grazer_matrix),
+  all(grazer_matrix >= 0)
+)
+
+grazer_pcoa_data %>%
+  mutate(total_grazers = rowSums(grazer_matrix)) %>%
+  filter(total_grazers == 0) %>%
+  select(site, year, plot_number, total_grazers) %>%
+  print(n = Inf)
+
+if (any(rowSums(grazer_matrix) == 0)) {
+  stop("Zero-only block-years found. Review these before Bray-Curtis PCoA.")
+}
+
+grazer_bray <- vegan::vegdist(
+  sqrt(grazer_matrix),
+  method = "bray"
+)
+
+grazer_pcoa <- vegan::wcmdscale(
+  grazer_bray,
+  k = 2,
+  eig = TRUE,
+  add = "lingoes"
+)
+
+grazer_pcoa_variance <- 100 *
+  grazer_pcoa$eig[1:2] /
+  sum(grazer_pcoa$eig[grazer_pcoa$eig > 0])
+
+grazer_pcoa_scores <- bind_cols(
+  grazer_pcoa_data %>%
+    select(site, year, plot_number),
+  as_tibble(grazer_pcoa$points[, 1:2])
+) %>%
+  rename(
+    PCoA1 = 4,
+    PCoA2 = 5
+  ) %>%
+  mutate(
+    site = factor(
+      site,
+      levels = c("big_river", "noyo"),
+      labels = c("Big River", "Noyo")
+    ),
+    year = factor(year, levels = c(2025, 2026))
+  )
+
+make_grazer_pcoa <- function(site_name) {
+
+  site_data <- grazer_pcoa_scores %>%
+    filter(site == site_name)
+
+  ggplot(
+    site_data,
+    aes(
+      x = PCoA1,
+      y = PCoA2,
+      color = year,
+      shape = year
+    )
+  ) +
+    geom_hline(yintercept = 0, color = "grey80") +
+    geom_vline(xintercept = 0, color = "grey80") +
+    geom_point(size = 3.5, alpha = 0.85) +
+    scale_color_manual(
+      values = c(
+        "2025" = "#D55E00",
+        "2026" = "#0072B2"
+      )
+    ) +
+    scale_shape_manual(
+      values = c(
+        "2025" = 16,
+        "2026" = 17
+      )
+    ) +
+    labs(
+      title = paste("Grazer Community PCoA —", site_name),
+      x = paste0(
+        "PCoA1 (", round(grazer_pcoa_variance[1], 1), "%)"
+      ),
+      y = paste0(
+        "PCoA2 (", round(grazer_pcoa_variance[2], 1), "%)"
+      ),
+      color = "Year",
+      shape = "Year"
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+grazer_pcoa_big_river <- make_grazer_pcoa("Big River")
+grazer_pcoa_noyo <- make_grazer_pcoa("Noyo")
+
+print(grazer_pcoa_big_river)
+print(grazer_pcoa_noyo)
+```
+
+```{r}
+grazer_vector_fit <- vegan::envfit(
+  grazer_pcoa$points[, 1:2],
+  sqrt(grazer_matrix),
+  permutations = 0
+)
+
+grazer_vectors <- as.data.frame(
+  vegan::scores(
+    grazer_vector_fit,
+    display = "vectors"
+  )
+) %>%
+  tibble::rownames_to_column("grazer_group")
+
+names(grazer_vectors)[2:3] <- c("PCoA1", "PCoA2")
+
+arrow_scale <- 0.75 * min(
+  diff(range(grazer_pcoa_scores$PCoA1)) /
+    diff(range(grazer_vectors$PCoA1)),
+  diff(range(grazer_pcoa_scores$PCoA2)) /
+    diff(range(grazer_vectors$PCoA2))
+)
+
+grazer_vectors <- grazer_vectors %>%
+  mutate(
+    PCoA1 = PCoA1 * arrow_scale,
+    PCoA2 = PCoA2 * arrow_scale
+  )
+
+add_grazer_vectors <- function(plot) {
+
+  plot +
+    geom_segment(
+      data = grazer_vectors,
+      aes(
+        x = 0,
+        y = 0,
+        xend = PCoA1,
+        yend = PCoA2
+      ),
+      inherit.aes = FALSE,
+      arrow = grid::arrow(
+        length = grid::unit(0.18, "cm")
+      ),
+      color = "grey40",
+      linewidth = 0.5
+    ) +
+    ggrepel::geom_text_repel(
+      data = grazer_vectors,
+      aes(
+        x = PCoA1 * 1.1,
+        y = PCoA2 * 1.1,
+        label = grazer_group
+      ),
+      inherit.aes = FALSE,
+      size = 3.3,
+      color = "black",
+      box.padding = 0.5,
+      point.padding = 0.3,
+      max.overlaps = Inf,
+      max.iter = 10000,
+      seed = 123,
+      segment.color = "grey65"
+    )
+}
+
+grazer_pcoa_big_river_vectors <- add_grazer_vectors(
+  grazer_pcoa_big_river
+)
+
+grazer_pcoa_noyo_vectors <- add_grazer_vectors(
+  grazer_pcoa_noyo
+)
+
+print(grazer_pcoa_big_river_vectors)
+print(grazer_pcoa_noyo_vectors)
+```
+
 
 ##COVER
 ```{r}
-library(dplyr)
-library(tidyr)
-library(stringr)
+cover_compare <- bind_rows(
 
+  # 2025 cover
+  cover_2025_survey %>%
+    transmute(
+      year,
+      survey_id,
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      CCA,
+      ACA,
+      ER,
+      BR,
+      turf,
+      algal_cover,
+      FLESHY,
+      SCUM,
+      SAND,
+      sand_source
+    ),
+
+  # 2026 cover
+  cover_2026 %>%
+    transmute(
+      year,
+      survey_id,
+      date,
+      site,
+      plot_type,
+      arkev_unit,
+      CCA,
+      ACA,
+      ER,
+      BR,
+      turf,
+      algal_cover,
+      FLESHY,
+      SCUM,
+      SAND,
+
+      sand_source = if_else(
+        !is.na(SAND),
+        "Measured",
+        "Missing"
+      )
+    )
+)
+
+# Verify combined cover dataset
+cover_compare %>%
+  group_by(year, site, plot_type) %>%
+  summarise(
+    n_surveys = n(),
+    n_unique_surveys = n_distinct(survey_id),
+    n_missing_sand = sum(is.na(SAND)),
+    n_missing_algal = sum(is.na(algal_cover)),
+    n_missing_fleshy = sum(is.na(FLESHY)),
+    .groups = "drop"
+  ) %>%
+  arrange(year, site, plot_type)
+```
+
+```{r}
 # Prepare benthic cover data
 cover_sitewide <- cover_compare %>%
   mutate(
@@ -5727,12 +6560,13 @@ print(cover_hurricane_noyo)
 ```
 
 ```{r}
+library(vegan)
 cover_groups <- c(
   "CCA", "ACA", "ER", "BR",
   "turf", "FLESHY", "SCUM"
 )
 
-# 1. Keep surveys with complete cover-group measurements
+# Keep surveys with complete cover-group measurements
 cover_comm <- cover_sitewide %>%
   filter(
     if_all(all_of(cover_groups), ~ !is.na(.x))
@@ -5744,7 +6578,7 @@ cover_comm %>%
   print()
 
 
-# 2. Average subplots within each block-date,
+# Average subplots within each block-date,
 # then dates within each block-year
 cover_block_year <- cover_comm %>%
   group_by(site, year, date, plot_number) %>%
@@ -5764,7 +6598,7 @@ cover_block_year %>%
   print()
 
 
-# 3. PERMANOVA and dispersion tests by site
+# PERMANOVA and dispersion tests by site
 for (site_name in c("big_river", "noyo")) {
 
   cat("\n========================\n")
@@ -5916,19 +6750,111 @@ for (obj in fish_objects) {
 ```
 
 ```{r}
-# Check which survey types were collected in 2025
-surveys_2025 %>%
-  count(data_type, sort = TRUE) %>%
-  print(n = Inf)
+fish_2026_check <- fish %>%
+  mutate(
+    year = as.integer(year),
+    date = as.Date(date),
+    plot_type = str_to_lower(as.character(plot_type)),
+    fish_location = str_to_lower(as.character(fish_location)),
+    plot_number = as.integer(
+      str_extract(as.character(arkev_unit), "\\d+")
+    ),
+    count_num = suppressWarnings(
+      as.numeric(as.character(count))
+    )
+  ) %>%
+  filter(
+    year == 2026,
+    fish_location %in% c("fish_on", "fish_off")
+  )
 
-# Check the 2026 fish observations
 fish_2026_check %>%
-  count(year, site, fish_location) %>%
+  group_by(site, fish_location) %>%
+  summarise(
+    n_records = n(),
+    n_survey_zones = n_distinct(
+      date, site, plot_type, arkev_unit, fish_location
+    ),
+    n_zero_counts = sum(count_num == 0, na.rm = TRUE),
+    n_missing_counts = sum(is.na(count_num)),
+    .groups = "drop"
+  ) %>%
   print(n = Inf)
 
-# Check valid 2026 fish survey zones
+fish_2026_check %>%
+  filter(is.na(count_num)) %>%
+  select(
+    date, site, plot_type, arkev_unit,
+    fish_location, species, count
+  ) %>%
+  print(n = Inf)
+
+```
+```{r}
+fish_2026_check %>%
+  filter(
+    site == "noyo",
+    plot_number == 9,
+    format(date, "%m") == "08"
+  ) %>%
+  select(
+    date,
+    plot_type,
+    arkev_unit,
+    fish_location,
+    species,
+    count_num,
+    checked,
+    notes
+  ) %>%
+  arrange(date, arkev_unit, fish_location) %>%
+  print(n = Inf, width = Inf)
+```
+```{r}
+fish_zone_2026 <- fish_2026_check %>%
+  group_by(
+    year, site, date, plot_type,
+    arkev_unit, plot_number, fish_location
+  ) %>%
+  summarise(
+    no_survey = any(
+      str_detect(
+        str_to_lower(coalesce(notes, "")),
+        "no survey data"
+      )
+    ),
+    missing_count = any(is.na(count_num)),
+    fish_count = sum(count_num, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    valid = !no_survey & !missing_count,
+    fish_count = if_else(
+      valid,
+      fish_count,
+      NA_real_
+    ),
+    area_m2 = if_else(
+      fish_location == "fish_on",
+      pi,
+      3 * pi
+    ),
+    fish_density = fish_count / area_m2
+  )
+
 fish_zone_2026 %>%
-  count(site, fish_location, valid) %>%
+  group_by(site, fish_location) %>%
+  summarise(
+    n_recorded_zones = n(),
+    n_valid = sum(valid),
+    n_not_surveyed = sum(no_survey),
+    n_other_incomplete = sum(missing_count & !no_survey),
+    n_genuine_zeros = sum(
+      valid & fish_count == 0,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
   print(n = Inf)
 ```
 
@@ -5938,6 +6864,7 @@ fish_zone_2025 <- surveys_2025 %>%
   mutate(
     year = 2025L,
     date = as.Date(date),
+    plot_type = str_to_lower(as.character(plot_type)),
     fish_location = data_type,
     plot_number = as.integer(
       str_extract(as.character(arkev_unit), "\\d+")
@@ -5966,7 +6893,6 @@ fish_zone_2025 <- surveys_2025 %>%
     fish_density = fish_count / area_m2
   )
 
-
 fish_zone_both <- bind_rows(
   fish_zone_2025 %>%
     select(
@@ -5977,15 +6903,6 @@ fish_zone_both <- bind_rows(
     ),
 
   fish_zone_2026 %>%
-    mutate(
-      year = 2026L,
-      area_m2 = if_else(
-        fish_location == "fish_on",
-        pi,
-        3 * pi
-      ),
-      fish_density = fish_count / area_m2
-    ) %>%
     select(
       year, site, date, plot_type,
       arkev_unit, plot_number,
@@ -5995,13 +6912,11 @@ fish_zone_both <- bind_rows(
 ) %>%
   filter(
     valid,
-    !is.na(fish_count),
-    fish_location %in% c("fish_on", "fish_off")
+    !is.na(fish_count)
   ) %>%
   mutate(
     month = as.integer(format(date, "%m"))
   )
-
 
 fish_zone_both %>%
   group_by(site, year, fish_location) %>%
@@ -6009,8 +6924,8 @@ fish_zone_both %>%
     n_zones = n(),
     n_blocks = n_distinct(plot_number),
     area_m2 = first(area_m2),
+    total_fish = sum(fish_count),
     mean_density = mean(fish_density),
-    median_density = median(fish_density),
     pct_with_fish = 100 * mean(fish_count > 0),
     .groups = "drop"
   ) %>%
@@ -8106,8 +9021,6 @@ noyo_month_audit %>%
   print(n = Inf, width = Inf)
 ```
 
-
-
 ```{r}
 noyo_shared_month <- integrated_block_date %>%
   filter(
@@ -8211,72 +9124,11 @@ vegan::permutest(
 ```
 
 
+
+
+
+
 ##combine 2025-2026 cover
-```{r}
-cover_compare <- bind_rows(
-
-  # 2025 cover
-  cover_2025_survey %>%
-    transmute(
-      year,
-      survey_id,
-      date,
-      site,
-      plot_type,
-      arkev_unit,
-      CCA,
-      ACA,
-      ER,
-      BR,
-      turf,
-      algal_cover,
-      FLESHY,
-      SCUM,
-      SAND,
-      sand_source
-    ),
-
-  # 2026 cover
-  cover_2026 %>%
-    transmute(
-      year,
-      survey_id,
-      date,
-      site,
-      plot_type,
-      arkev_unit,
-      CCA,
-      ACA,
-      ER,
-      BR,
-      turf,
-      algal_cover,
-      FLESHY,
-      SCUM,
-      SAND,
-
-      sand_source = if_else(
-        !is.na(SAND),
-        "Measured",
-        "Missing"
-      )
-    )
-)
-
-# Verify combined cover dataset
-cover_compare %>%
-  group_by(year, site, plot_type) %>%
-  summarise(
-    n_surveys = n(),
-    n_unique_surveys = n_distinct(survey_id),
-    n_missing_sand = sum(is.na(SAND)),
-    n_missing_algal = sum(is.na(algal_cover)),
-    n_missing_fleshy = sum(is.na(FLESHY)),
-    .groups = "drop"
-  ) %>%
-  arrange(year, site, plot_type)
-```
-
 ```{r}
 community_cover_2025_2026 <- community_locations_2025_2026 %>%
   left_join(
