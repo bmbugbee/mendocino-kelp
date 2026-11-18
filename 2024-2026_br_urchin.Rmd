@@ -1,0 +1,269 @@
+---
+title: "2024-2026_br_urchin"
+output: html_document
+date: "2026-11-18"
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(googlesheets4)
+library(purrr)
+library(ggplot2)
+library(stringr)
+```
+
+```{r}
+br_all_grazers = read_sheet('https://docs.google.com/spreadsheets/d/1XqsI25WqmtFHuYAPvPWEGXigq8hOMziOpn_0ccZi1ec/edit?gid=0#gid=0')
+head(br_all_grazers)
+```
+
+```{r}
+library(tidyverse)
+
+# Columns to include
+br_all_grazer_cols <- c(
+  "total_purple_urchin",
+  "purple_urchins_<2cm",
+  "purple_urchins_>2cm",
+  "red_urchins",
+  "tegula"
+)
+
+# Convert list-columns to numeric
+to_numeric <- function(x) {
+  if (!is.list(x)) return(as.numeric(x))
+
+  map_dbl(x, ~ if (length(.x) == 0) {
+    NA_real_
+  } else {
+    as.numeric(.x[[1]])
+  })
+}
+
+br_all_grazer_long <- br_all_grazers %>%
+  mutate(
+    survey_date = as.Date(
+      sprintf("%04d-%02d-%02d", year, month, date)
+    ),
+    sample_month = as.Date(
+      format(survey_date, "%Y-%m-01")
+    ),
+    across(all_of(br_all_grazer_cols), to_numeric)
+  ) %>%
+  pivot_longer(
+    cols = all_of(br_all_grazer_cols),
+    names_to = "species",
+    values_to = "density"
+  ) %>%
+  mutate(
+    species = recode(
+      species,
+      "total_purple_urchin" = "Total purple urchins",
+      "purple_urchins_<2cm" = "Purple urchins <2 cm",
+      "purple_urchins_>2cm" = "Purple urchins >2 cm",
+      "red_urchins" = "Red urchins",
+      "tegula" = "Tegula"
+    )
+  )
+```
+
+#mean and SE
+```{r}
+# Calculate density for each observation (individuals/m²)
+br_all_grazer_monthly <- br_all_grazer_long %>%
+  mutate(
+    density = density / 3.14
+  ) %>%
+  group_by(
+    sample_month,
+    treatment,
+    plot_id,
+    species
+  ) %>%
+  summarise(
+    density = if (all(is.na(density))) {
+      NA_real_
+    } else {
+      mean(density, na.rm = TRUE)
+    },
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(density))
+
+# Calculate monthly mean density and SE
+br_all_grazer_monthly_summary <- br_all_grazer_monthly %>%
+  group_by(
+    sample_month,
+    treatment,
+    species
+  ) %>%
+  summarise(
+    mean_density = mean(density),
+    se = sd(density) / sqrt(n()),
+    n = n(),
+    .groups = "drop"
+  )
+```
+
+```{r}
+br_all_purple <- br_all_grazer_monthly_summary %>%
+  filter(
+    species %in% c(
+      "Total purple urchins",
+      "Purple urchins <2 cm",
+      "Purple urchins >2 cm"
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = sample_month,
+      y = mean_density,
+      color = species,
+    )
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = pmax(0, mean_density - se),
+      ymax = mean_density + se
+    ),
+    width = 5,
+    alpha = 0.5
+  ) +
+  scale_x_date(
+    date_breaks = "2 months",
+    date_labels = "%b %Y"
+  ) +
+  labs(
+    title = "Purple urchin density over time",
+    x = "Date",
+    y = expression("Density (individuals/m"^2*")"),
+    color = "Size class"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+br_all_purple
+```
+
+```{r}
+br_all_grazers_plot <- br_all_grazer_monthly_summary %>%
+  filter(
+    species %in% c(
+      "Total purple urchins",
+      "Red urchins",
+      "Tegula"
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = sample_month,
+      y = mean_density,
+      color = species,
+    )
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = pmax(0, mean_density - se),
+      ymax = mean_density + se
+    ),
+    width = 5,
+    alpha = 0.5
+  ) +
+  scale_x_date(
+    date_breaks = "2 months",
+    date_labels = "%b %Y"
+  ) +
+  labs(
+    title = "Grazer density over time",
+    x = "Date",
+    y = expression("Density (individuals/m"^2*")")
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+br_all_grazers_plot
+```
+
+```{r}
+br_urchins_2526 <- br_all_grazer_monthly_summary %>%
+  filter(
+    sample_month >= as.Date("2025-01-01"),
+    sample_month <= as.Date("2026-12-31"),
+    species %in% c(
+      "Purple urchins <2 cm",
+      "Purple urchins >2 cm",
+      "Red urchins"
+    )
+  ) %>%
+  mutate(
+    species = factor(
+      species,
+      levels = c(
+        "Purple urchins <2 cm",
+        "Purple urchins >2 cm",
+        "Red urchins"
+      )
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = sample_month,
+      y = mean_density,
+      color = species
+    )
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_errorbar(
+    aes(
+      ymin = pmax(0, mean_density - se),
+      ymax = mean_density + se
+    ),
+    width = 6,
+    alpha = 0.5
+  ) +
+  scale_color_manual(
+    values = c(
+      "Purple urchins <2 cm" = "#9C65B8",
+      "Purple urchins >2 cm" = "#542788",
+      "Red urchins" = "red"
+    )
+  ) +
+  scale_x_date(
+    date_breaks = "3 months",
+    date_labels = "%b %Y"
+  ) +
+  labs(
+    title = "Urchin density over time (2025–2026)",
+    x = "Date",
+    y = expression("Density (individuals/m"^2*")"),
+    color = "Species / Size class"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    legend.position = "right"
+  )
+
+br_urchins_2526
+```
+
